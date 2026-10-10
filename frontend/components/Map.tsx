@@ -1,81 +1,15 @@
 "use client"; // Required for Leaflet
 
+import { useEffect, useState } from "react";
 import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Feature, GeoJsonObject } from "geojson";
 import type { PathOptions, Layer } from "leaflet";
 
 // ---------------------------------------------------------------------------
-// Mock GeoJSON – Three road-cut features in Chennai, India
-// Features 2 & 3 intentionally overlap to simulate a spatial conflict.
+// Backend URL — points to the live FastAPI server
 // ---------------------------------------------------------------------------
-const mockRoadCuts: GeoJsonObject = {
-  type: "FeatureCollection",
-  features: [
-    // Feature 1 – Water Board (On Schedule, Green)
-    {
-      type: "Feature",
-      properties: {
-        department: "Chennai Metropolitan Water Supply & Sewerage Board",
-        status: "On Schedule",
-        startDate: "2026-09-15",
-        endDate: "2026-10-20",
-        purpose: "Underground water pipeline replacement",
-      },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [80.265, 13.082],
-          [80.268, 13.084],
-          [80.271, 13.086],
-          [80.274, 13.087],
-        ],
-      },
-    },
-
-    // Feature 2 – Telecom (Critical Overlap, Red) — overlaps with Feature 3
-    {
-      type: "Feature",
-      properties: {
-        department: "Jio Telecom – Fiber Division",
-        status: "Critical Overlap",
-        startDate: "2026-10-01",
-        endDate: "2026-11-05",
-        purpose: "Fiber optic cable laying",
-      },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [80.270, 13.079],
-          [80.272, 13.082],
-          [80.274, 13.085],
-          [80.276, 13.088],
-        ],
-      },
-    },
-
-    // Feature 3 – Electricity Board (Critical Overlap, Red) — overlaps with Feature 2
-    {
-      type: "Feature",
-      properties: {
-        department: "Tamil Nadu Generation & Distribution Corporation (TANGEDCO)",
-        status: "Critical Overlap",
-        startDate: "2026-10-03",
-        endDate: "2026-11-10",
-        purpose: "Underground power cable trench",
-      },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [80.271, 13.078],
-          [80.273, 13.081],
-          [80.275, 13.084],
-          [80.277, 13.087],
-        ],
-      },
-    },
-  ],
-};
+const API_URL = "http://localhost:8000/api/projects";
 
 // ---------------------------------------------------------------------------
 // Style function – red/heavy for conflicts, green/normal otherwise
@@ -114,24 +48,75 @@ function onEachFeature(feature: Feature, layer: Layer) {
 // Map component
 // ---------------------------------------------------------------------------
 export default function Map() {
+  // ── State: holds GeoJSON fetched from the FastAPI backend ──────────────
+  const [conflictData, setConflictData] = useState<GeoJsonObject | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // ── Fetch on mount ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(API_URL, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+        return res.json() as Promise<GeoJsonObject>;
+      })
+      .then((data) => setConflictData(data))
+      .catch((err) => {
+        if (err.name !== "AbortError") {
+          console.error("[Sanchal] Failed to fetch conflict data:", err);
+          setFetchError(err.message);
+        }
+      });
+
+    // Cleanup: cancel the request if the component unmounts mid-flight
+    return () => controller.abort();
+  }, []);
+
   return (
     <MapContainer
       center={[13.0827, 80.2707]}
       zoom={14}
       className="w-full h-full rounded-xl border border-zinc-800 z-0"
     >
-      {/* 100% Free CartoDB Dark Matter Tiles */}
+      {/* Esri Dark Gray Canvas Tiles */}
       <TileLayer
         url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
         attribution='Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
       />
 
-      {/* Road-cut conflict layer */}
-      <GeoJSON
-        data={mockRoadCuts}
-        style={conflictStyle}
-        onEachFeature={onEachFeature}
-      />
+      {/* Road-cut conflict layer — rendered only after data arrives */}
+      {conflictData && (
+        <GeoJSON
+          // key forces a full layer re-mount when data changes, preventing
+          // react-leaflet's stale-data bug with the GeoJSON component.
+          key={JSON.stringify(conflictData).length}
+          data={conflictData}
+          style={conflictStyle}
+          onEachFeature={onEachFeature}
+        />
+      )}
+
+      {/* Overlay a subtle error hint on the map if the fetch failed */}
+      {fetchError && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 1000,
+            background: "rgba(220,38,38,0.85)",
+            color: "#fff",
+            padding: "6px 14px",
+            borderRadius: 8,
+            fontSize: 12,
+            pointerEvents: "none",
+          }}
+        >
+          ⚠ Could not load live data — is the backend running on port 8000?
+        </div>
+      )}
     </MapContainer>
   );
 }

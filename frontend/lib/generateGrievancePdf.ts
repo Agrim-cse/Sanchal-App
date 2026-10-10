@@ -145,7 +145,7 @@ export async function generatePDF(conflictData: ConflictData): Promise<void> {
   });
 
   // ── 7. Section title: Recommended Action ──────────────────────────────
-  // @ts-expect-error – lastAutoTable is injected by jspdf-autotable at runtime
+  // lastAutoTable is injected by jspdf-autotable at runtime
   const afterTable: number = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
 
   doc.setFont("helvetica", "bold");
