@@ -2,6 +2,14 @@
 
 Sanchal is a location-scoped civic works and grievance app for Greater Chennai. The frontend is built with Next.js; the API is FastAPI with SQLAlchemy and PostgreSQL (Supabase).
 
+## Demo video
+
+[Watch the Sanchal demo on YouTube](https://youtu.be/7J1tRZKFDrU?si=uiVDO4nRwfH7cAd3)
+
+## Live application
+
+[Open Sanchal](https://sanchal-app.vercel.app/)
+
 ## Requirements
 
 - Node.js and npm
