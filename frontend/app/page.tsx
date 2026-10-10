@@ -55,13 +55,16 @@ function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-2.5">
-            <Image
-              src="/sanchal-logo.png"
-              alt="Sanchal"
-              width={36}
-              height={36}
-              className="rounded-xl object-contain bg-[#3d1f00] p-0.5"
-            />
+            <span className="relative h-9 w-12 shrink-0 overflow-hidden rounded-lg bg-[#3d1f00]">
+              <Image
+                src="/sanchal-logo.png"
+                alt="Sanchal logo"
+                fill
+                priority
+                sizes="48px"
+                className="object-contain"
+              />
+            </span>
             <span className={`font-bold text-xl tracking-tight transition-colors ${scrolled ? "text-slate-800" : "text-white"}`}>
               Sanchal
             </span>
@@ -512,14 +515,27 @@ function PortalsSection() {
 }
 
 function Footer() {
+  const [year, setYear] = useState(2026);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setYear(new Date().getFullYear()), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   return (
     <footer className="bg-slate-900 text-slate-400 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-blue-600 flex items-center justify-center">
-              <Activity className="w-4 h-4 text-white" />
-            </div>
+            <span className="relative h-10 w-14 shrink-0 overflow-hidden rounded-lg bg-[#3d1f00]">
+              <Image
+                src="/sanchal-logo.png"
+                alt="Sanchal logo"
+                fill
+                sizes="56px"
+                className="object-contain"
+              />
+            </span>
             <span className="font-bold text-white text-lg tracking-tight">Sanchal</span>
             <span className="text-slate-600 text-sm">· Municipal Road Conflict Monitor</span>
           </div>
@@ -527,11 +543,11 @@ function Footer() {
             <button onClick={() => scrollTo("about")} className="hover:text-white transition-colors">About</button>
             <button onClick={() => scrollTo("stats")} className="hover:text-white transition-colors">The Impact</button>
             <button onClick={() => scrollTo("portals")} className="hover:text-white transition-colors">Portals</button>
-            <Link href="/dashboard" className="hover:text-white transition-colors">Login</Link>
+            <Link href="/auth" className="hover:text-white transition-colors">Login</Link>
           </nav>
         </div>
         <div className="mt-8 pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
-          <p>© {new Date().getFullYear()} Sanchal. Built for smarter, accountable urban infrastructure.</p>
+          <p>© {year} Sanchal. Built for smarter, accountable urban infrastructure.</p>
           <p>Made with &hearts; for Bharat&apos;s cities.</p>
         </div>
       </div>

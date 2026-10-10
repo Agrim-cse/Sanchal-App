@@ -9,7 +9,8 @@ import type { PathOptions, Layer } from "leaflet";
 // ---------------------------------------------------------------------------
 // Backend URL — points to the live FastAPI server
 // ---------------------------------------------------------------------------
-const API_URL = "http://localhost:8000/api/projects";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_URL = `${API_BASE_URL}/api/projects`;
 
 // ---------------------------------------------------------------------------
 // Style function – red/heavy for conflicts, green/normal otherwise

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -23,9 +24,10 @@ import {
   ShieldCheck,
   Upload,
   UserRound,
-  Waves,
   X,
 } from "lucide-react";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 const MapView = dynamic(() => import("@/components/Map"), {
   ssr: false,
@@ -37,16 +39,32 @@ const MapView = dynamic(() => import("@/components/Map"), {
   ),
 });
 
-type WorkStatus = "In progress" | "Scheduled";
-
-interface ActiveWork {
+interface ApiProjectProperties {
   id: string;
   department: string;
-  title: string;
-  details: string;
-  location: string;
-  status: WorkStatus;
-  estimatedCompletion: string;
+  purpose: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  conflictsWith: string[];
+}
+
+interface ApiProjectsResponse {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    properties: ApiProjectProperties;
+  }>;
+}
+
+interface ApiConflict {
+  project1_id: string;
+  project2_id: string;
+  delay_risk_score: number;
+}
+
+interface ApiConflictsResponse {
+  conflicts: ApiConflict[];
 }
 
 interface LocalOfficial {
@@ -67,43 +85,12 @@ interface PastRecord {
   completedOn: string;
 }
 
-interface ResidentDashboardData {
-  works: ActiveWork[];
+interface ResidentDashboardFallbacks {
   officials: LocalOfficial[];
-  delayRisks: Record<string, number>;
   pastRecords: PastRecord[];
 }
 
-const MOCK_DASHBOARD_DATA: ResidentDashboardData = {
-  works: [
-    {
-      id: "WRK-1048",
-      department: "PWD",
-      title: "Road surface restoration",
-      details: "Pothole repairs and resurfacing following underground utility work.",
-      location: "Royapettah High Road",
-      status: "In progress",
-      estimatedCompletion: "18 Oct 2026",
-    },
-    {
-      id: "WRK-1052",
-      department: "Water",
-      title: "Water-main pipe replacement",
-      details: "Replacing a damaged section of the neighborhood water main.",
-      location: "Peter’s Road, near Royapettah",
-      status: "In progress",
-      estimatedCompletion: "21 Oct 2026",
-    },
-    {
-      id: "WRK-1057",
-      department: "GCC",
-      title: "Storm-water drain upgrade",
-      details: "Drain improvements and scheduled road excavation.",
-      location: "Lloyds Road",
-      status: "Scheduled",
-      estimatedCompletion: "28 Oct 2026",
-    },
-  ],
+const MOCK_DASHBOARD_DATA: ResidentDashboardFallbacks = {
   officials: [
     {
       id: "OFF-091",
@@ -133,11 +120,6 @@ const MOCK_DASHBOARD_DATA: ResidentDashboardData = {
       initials: "KC",
     },
   ],
-  delayRisks: {
-    "WRK-1048": 28,
-    "WRK-1052": 64,
-    "WRK-1057": 18,
-  },
   pastRecords: [
     {
       id: "HIS-0248",
@@ -162,6 +144,16 @@ const MOCK_DASHBOARD_DATA: ResidentDashboardData = {
     },
   ],
 };
+
+function formatProjectDate(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 const ISSUE_TYPES = [
   "Unfilled pothole",
@@ -194,13 +186,75 @@ function riskLevel(score: number): { label: string; color: string; bar: string }
 }
 
 export default function ResidentDashboard() {
-  const [dashboardData] = useState<ResidentDashboardData>(MOCK_DASHBOARD_DATA);
+  const [works, setWorks] = useState<ApiProjectProperties[]>([]);
+  const [conflicts, setConflicts] = useState<ApiConflict[]>([]);
+  const [isLoadingWorks, setIsLoadingWorks] = useState(true);
+  const [worksError, setWorksError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [issueType, setIssueType] = useState(ISSUE_TYPES[0]);
   const [message, setMessage] = useState("");
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [reportSubmitted, setReportSubmitted] = useState(false);
   const [formError, setFormError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadWorks(): Promise<void> {
+      try {
+        const [projectsResponse, conflictsResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/projects`, { signal: controller.signal }),
+          fetch(`${API_BASE_URL}/api/conflicts`, { signal: controller.signal }),
+        ]);
+        if (!projectsResponse.ok) {
+          throw new Error(`Projects service responded with ${projectsResponse.status}`);
+        }
+        if (!conflictsResponse.ok) {
+          throw new Error(`Conflict service responded with ${conflictsResponse.status}`);
+        }
+
+        const [projectsData, conflictsData] = await Promise.all([
+          projectsResponse.json() as Promise<ApiProjectsResponse>,
+          conflictsResponse.json() as Promise<ApiConflictsResponse>,
+        ]);
+        if (!Array.isArray(projectsData.features) || !Array.isArray(conflictsData.conflicts)) {
+          throw new Error("The projects or conflicts service returned an invalid response.");
+        }
+
+        setWorks(projectsData.features.map(({ properties }) => properties));
+        setConflicts(conflictsData.conflicts);
+        setWorksError(null);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+        const message =
+          error instanceof Error ? error.message : "An unexpected error occurred.";
+        console.error("[Sanchal] Failed to load resident dashboard works:", error);
+        setWorksError(message);
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingWorks(false);
+      }
+    }
+
+    void loadWorks();
+    return () => controller.abort();
+  }, [retryCount]);
+
+  const delayRiskByProject = new Map<string, number>();
+  conflicts.forEach((conflict) => {
+    [conflict.project1_id, conflict.project2_id].forEach((projectId) => {
+      delayRiskByProject.set(
+        projectId,
+        Math.max(delayRiskByProject.get(projectId) ?? 0, conflict.delay_risk_score),
+      );
+    });
+  });
+
+  function handleRetryWorks() {
+    setIsLoadingWorks(true);
+    setWorksError(null);
+    setRetryCount((count) => count + 1);
+  }
 
   function handleProofChange(event: ChangeEvent<HTMLInputElement>) {
     setProofFile(event.target.files?.[0] ?? null);
@@ -229,8 +283,14 @@ export default function ResidentDashboard() {
         onClick={() => setMobileNavOpen(false)}
         className="flex items-center gap-3 border-b border-gray-100 px-6 py-6"
       >
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-700 text-white shadow-sm">
-          <Waves className="h-6 w-6" />
+        <span className="relative h-10 w-14 shrink-0 overflow-hidden rounded-lg bg-[#3d1f00] shadow-sm">
+          <Image
+            src="/sanchal-logo.png"
+            alt="Sanchal logo"
+            fill
+            sizes="56px"
+            className="object-contain"
+          />
         </span>
         <span>
           <span className="block text-lg font-extrabold tracking-[0.14em] text-blue-900">
@@ -415,82 +475,122 @@ export default function ResidentDashboard() {
                 </p>
               </div>
               <span className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-600">
-                {dashboardData.works.length} projects
+                {isLoadingWorks
+                  ? "Loading…"
+                  : worksError
+                    ? "Unavailable"
+                    : `${works.length} projects`}
               </span>
             </div>
 
-            <div className="grid gap-4 xl:grid-cols-3">
-              {dashboardData.works.map((work) => {
-                const risk = dashboardData.delayRisks[work.id] ?? 0;
-                const riskDisplay = riskLevel(risk);
+            {isLoadingWorks ? (
+              <div
+                role="status"
+                className="flex items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-5 py-12 text-sm text-gray-500 shadow-md"
+              >
+                <LoaderCircle className="h-5 w-5 animate-spin text-blue-700" />
+                Loading active neighborhood works…
+              </div>
+            ) : worksError ? (
+              <div
+                role="alert"
+                className="flex flex-col items-start justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 p-5 sm:flex-row sm:items-center"
+              >
+                <p className="flex items-start gap-2 text-sm text-red-800">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  Could not load active works: {worksError}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleRetryWorks}
+                  className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : works.length === 0 ? (
+              <div className="rounded-2xl border border-gray-200 bg-white px-5 py-12 text-center text-sm text-gray-500 shadow-md">
+                No active works were returned for this area.
+              </div>
+            ) : (
+              <div className="grid gap-4 xl:grid-cols-3">
+                {works.map((work) => {
+                  const risk = delayRiskByProject.get(work.id) ?? 0;
+                  const riskDisplay = riskLevel(risk);
+                  const isAtRisk = work.status === "Critical Overlap";
 
-                return (
-                  <article
-                    key={work.id}
-                    className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-800">
-                        <Building2 className="h-3.5 w-3.5" />
-                        {work.department}
-                      </span>
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                          work.status === "In progress"
-                            ? "bg-teal-50 text-teal-800"
-                            : "bg-gray-100 text-gray-600"
-                        }`}
-                      >
-                        {work.status}
-                      </span>
-                    </div>
-                    <h3 className="mt-4 text-base font-bold text-gray-900">{work.title}</h3>
-                    <p className="mt-1.5 min-h-10 text-sm leading-5 text-gray-600">{work.details}</p>
-                    <p className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
-                      <MapPin className="h-3.5 w-3.5" />
-                      {work.location}
-                    </p>
-
-                    <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-4 text-sm">
-                      <span className="inline-flex items-center gap-1.5 text-gray-500">
-                        <CalendarDays className="h-4 w-4" />
-                        Est. completion
-                      </span>
-                      <span className="font-semibold text-gray-800">{work.estimatedCompletion}</span>
-                    </div>
-
-                    <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700">
-                          <Clock3 className="h-3.5 w-3.5 text-blue-700" />
-                          Estimated delay chance
+                  return (
+                    <article
+                      key={work.id}
+                      className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-800">
+                          <Building2 className="h-3.5 w-3.5" />
+                          {work.department}
                         </span>
-                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${riskDisplay.color}`}>
-                          {riskDisplay.label}
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                            isAtRisk ? "bg-amber-50 text-amber-800" : "bg-teal-50 text-teal-800"
+                          }`}
+                        >
+                          {isAtRisk ? "Schedule at risk" : "On schedule"}
                         </span>
                       </div>
-                      <div
-                        className="mt-2.5 h-2 overflow-hidden rounded-full bg-gray-200"
-                        role="progressbar"
-                        aria-label={`Estimated delay chance for ${work.title}`}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={risk}
-                      >
+                      <h3 className="mt-4 text-base font-bold text-gray-900">{work.purpose}</h3>
+                      <p className="mt-1.5 min-h-10 text-sm leading-5 text-gray-600">
+                        {work.status === "Critical Overlap"
+                          ? `This project has a reported overlap with ${work.conflictsWith.join(", ")}.`
+                          : "No overlapping works are currently reported for this project."}
+                      </p>
+                      <p className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                        <MapPin className="h-3.5 w-3.5" />
+                        Mapped works corridor · Chennai
+                      </p>
+
+                      <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-4 text-sm">
+                        <span className="inline-flex items-center gap-1.5 text-gray-500">
+                          <CalendarDays className="h-4 w-4" />
+                          Est. completion
+                        </span>
+                        <span className="font-semibold text-gray-800">
+                          {formatProjectDate(work.endDate)}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700">
+                            <Clock3 className="h-3.5 w-3.5 text-blue-700" />
+                            Estimated delay chance
+                          </span>
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${riskDisplay.color}`}>
+                            {riskDisplay.label}
+                          </span>
+                        </div>
                         <div
-                          className={`h-full rounded-full ${riskDisplay.bar}`}
-                          style={{ width: `${risk}%` }}
-                        />
+                          className="mt-2.5 h-2 overflow-hidden rounded-full bg-gray-200"
+                          role="progressbar"
+                          aria-label={`Estimated delay chance for ${work.purpose}`}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={risk}
+                        >
+                          <div
+                            className={`h-full rounded-full ${riskDisplay.bar}`}
+                            style={{ width: `${risk}%` }}
+                          />
+                        </div>
+                        <p className="mt-1.5 text-right text-xs font-semibold text-gray-500">{risk}%</p>
                       </div>
-                      <p className="mt-1.5 text-right text-xs font-semibold text-gray-500">{risk}%</p>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
             <p className="mt-3 text-xs leading-5 text-gray-500">
-              Delay estimates are indicative predictions based on project risk signals; final schedules
-              are confirmed by the responsible department.
+              Delay estimates use the backend conflict-risk score; final schedules are confirmed by
+              the responsible department.
             </p>
           </section>
 
@@ -629,7 +729,7 @@ export default function ResidentDashboard() {
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {dashboardData.officials.map((official) => (
+              {MOCK_DASHBOARD_DATA.officials.map((official) => (
                 <article
                   key={official.id}
                   className="rounded-2xl border border-gray-200 bg-white p-5 shadow-md"
@@ -679,7 +779,7 @@ export default function ResidentDashboard() {
             </div>
             <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-md">
               <div className="divide-y divide-gray-100">
-                {dashboardData.pastRecords.map((record) => (
+                {MOCK_DASHBOARD_DATA.pastRecords.map((record) => (
                   <article
                     key={record.id}
                     className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"

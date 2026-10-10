@@ -509,13 +509,16 @@ export default function AuthPage() {
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden">
         {/* Gradient Header */}
         <div className={`bg-gradient-to-br ${accentColor} px-8 py-6 flex flex-col items-center gap-3 transition-all duration-500`}>
-          <Image
-            src="/sanchal-logo.png"
-            alt="Sanchal Logo"
-            width={72}
-            height={72}
-            className="rounded-2xl object-contain bg-[#3d1f00]/40 p-1"
-          />
+          <span className="relative h-20 w-28 shrink-0 overflow-hidden rounded-xl bg-[#3d1f00]">
+            <Image
+              src="/sanchal-logo.png"
+              alt="Sanchal Logo"
+              fill
+              priority
+              sizes="112px"
+              className="object-contain"
+            />
+          </span>
           <div className="text-center">
             <h1 className="text-2xl font-extrabold text-white tracking-tight">Sanchal</h1>
             <p className="text-white/60 text-xs mt-0.5 uppercase tracking-widest font-medium">

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import {
   Activity,
   AlertTriangle,
@@ -31,6 +32,8 @@ import {
 import Link from "next/link";
 import { generatePDF } from "@/lib/generateGrievancePdf";
 import type { ConflictData } from "@/lib/generateGrievancePdf";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 const MapView = dynamic(() => import("@/components/Map"), {
   ssr: false,
@@ -266,8 +269,8 @@ export default function Dashboard() {
     async function loadDashboard(): Promise<void> {
       try {
         const [conflictsResponse, projectsResponse] = await Promise.all([
-          fetch("http://localhost:8000/api/conflicts", { signal: controller.signal }),
-          fetch("http://localhost:8000/api/projects", { signal: controller.signal }),
+          fetch(`${API_BASE_URL}/api/conflicts`, { signal: controller.signal }),
+          fetch(`${API_BASE_URL}/api/projects`, { signal: controller.signal }),
         ]);
         if (!conflictsResponse.ok) {
           throw new Error(`Conflict service responded with ${conflictsResponse.status}`);
@@ -353,8 +356,14 @@ export default function Dashboard() {
         className="flex items-center gap-3 border-b border-gray-100 px-6 py-6"
         onClick={() => setMobileNavOpen(false)}
       >
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-700 text-white shadow-sm">
-          <Waves className="h-6 w-6" />
+        <span className="relative h-10 w-14 shrink-0 overflow-hidden rounded-lg bg-[#3d1f00] shadow-sm">
+          <Image
+            src="/sanchal-logo.png"
+            alt="Sanchal logo"
+            fill
+            sizes="56px"
+            className="object-contain"
+          />
         </span>
         <span>
           <span className="block text-lg font-extrabold tracking-[0.14em] text-blue-900">

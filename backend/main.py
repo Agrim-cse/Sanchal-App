@@ -51,9 +51,9 @@ app.add_middleware(
 #
 # coordinates: list of [lon, lat] pairs  (GeoJSON convention)
 # Buffer radius uses decimal-degree approximation:
-#   ~0.000090° ≈ 10 m near Chennai  (1° lat ≈ 111 km)
+#   ~0.0005° ≈ 55 m near Chennai  (1° lat ≈ 111 km)
 # ─────────────────────────────────────────────────────────────────────────────
-BUFFER_DEGREES = 0.00009   # ≈ 10-metre excavation corridor
+BUFFER_DEGREES = 0.0005   # ≈ 55-metre excavation corridor
 
 RAW_PROJECTS: list[dict[str, Any]] = [
     {
