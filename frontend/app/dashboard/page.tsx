@@ -21,6 +21,7 @@ import {
   Loader2,
   MapPin,
   Menu,
+  LogOut,
   Radio,
   Route,
   ShieldCheck,
@@ -38,7 +39,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 const MapView = dynamic(() => import("@/components/Map"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full min-h-[340px] items-center justify-center rounded-lg bg-gray-100 text-sm text-gray-500">
+    <div className="flex h-full min-h-[340px] items-center justify-center rounded-lg bg-gray-100 text-sm text-gray-500 dark:text-gray-400">
       <Loader2 className="mr-2 h-5 w-5 animate-spin text-blue-600" />
       Loading jurisdiction map…
     </div>
@@ -271,13 +272,36 @@ export default function Dashboard() {
   const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState("Today");
+  const [greeting, setGreeting] = useState("Good morning");
+  const [firstName, setFirstName] = useState("");
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   useEffect(() => {
+    // Force light mode
+    document.documentElement.classList.remove("dark");
+    localStorage.removeItem("theme");
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("sanchal_user");
+    localStorage.removeItem("sanchal_token");
+    router.push("/auth");
+  };
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting("Good morning");
+    else if (hour < 17) setGreeting("Good afternoon");
+    else setGreeting("Good evening");
+
     try {
       const storedUser = localStorage.getItem("sanchal_user");
       if (storedUser) {
         const user = JSON.parse(storedUser) as StoredUser;
         startTransition(() => setSignedInUser(user));
+        if (user.full_name) {
+          setFirstName(user.full_name.split(" ")[0]);
+        }
       }
     } catch {
       localStorage.removeItem("sanchal_user");
@@ -379,7 +403,7 @@ export default function Dashboard() {
     <div className="flex h-full flex-col">
       <Link
         href="#overview"
-        className="flex items-center gap-3 border-b border-gray-100 px-6 py-6"
+        className="flex items-center gap-3 border-b border-gray-100 dark:border-gray-800/50 px-6 py-6"
         onClick={() => setMobileNavOpen(false)}
       >
         <span className="relative h-10 w-14 shrink-0 overflow-hidden rounded-lg bg-[#3d1f00] shadow-sm">
@@ -395,7 +419,7 @@ export default function Dashboard() {
           <span className="block text-lg font-extrabold tracking-[0.14em] text-blue-900">
             SANCHAL
           </span>
-          <span className="block text-[11px] font-medium text-gray-500">
+          <span className="block text-[11px] font-medium text-gray-500 dark:text-gray-400">
             Municipal Works Monitor
           </span>
         </span>
@@ -412,14 +436,14 @@ export default function Dashboard() {
             onClick={() => setMobileNavOpen(false)}
             className={`flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold transition-colors ${
               index === 0
-                ? "bg-blue-50 text-blue-800"
-                : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                ? "bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-400"
+                : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:bg-gray-950 hover:text-gray-900 dark:text-gray-50"
             }`}
           >
             <Icon className={`h-[18px] w-[18px] ${index === 0 ? "text-blue-700" : "text-gray-400"}`} />
             {label}
             {label === "Active Works" && (
-              <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-xs font-bold text-blue-700 shadow-sm">
+              <span className="ml-auto rounded-full bg-white dark:bg-gray-900 px-2 py-0.5 text-xs font-bold text-blue-700 shadow-sm">
                 {isLoading ? "—" : activeSiteCount}
               </span>
             )}
@@ -427,7 +451,7 @@ export default function Dashboard() {
         ))}
       </nav>
 
-      <div className="border-t border-gray-100 p-4">
+      <div className="border-t border-gray-100 dark:border-gray-800/50 p-4">
         <button
           type="button"
           onClick={() => {
@@ -435,14 +459,14 @@ export default function Dashboard() {
             router.push("/profile");
           }}
           aria-label="Open your profile"
-          className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm transition hover:border-blue-200 hover:bg-blue-50/40"
+          className="flex items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 dark:bg-blue-900/30/40"
         >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm font-bold text-teal-800">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm font-bold text-teal-800 dark:text-teal-400">
             {getInitials(signedInUser?.full_name)}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-bold text-gray-900">{signedInUser?.full_name ?? "Your profile"}</span>
-            <span className="block truncate text-xs text-gray-500">
+            <span className="block truncate text-sm font-bold text-gray-900 dark:text-gray-50">{signedInUser?.full_name ?? "Your profile"}</span>
+            <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
               {signedInUser?.role === "official" ? "Municipal Official" : "Resident"}
               {signedInUser?.profession_department ? ` · ${signedInUser.profession_department}` : signedInUser?.home_zone ? ` · ${signedInUser.home_zone}` : ""}
             </span>
@@ -454,8 +478,8 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 lg:pl-72 flex flex-col">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden h-screen w-72 border-r border-gray-200 bg-white lg:block">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-50 lg:pl-72 flex flex-col">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden h-screen w-72 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 lg:block">
         {sidebar}
       </aside>
 
@@ -467,12 +491,12 @@ export default function Dashboard() {
             className="absolute inset-0 bg-gray-950/30"
             onClick={() => setMobileNavOpen(false)}
           />
-          <aside className="relative z-10 h-full w-[min(84vw,320px)] bg-white shadow-xl">
+          <aside className="relative z-10 h-full w-[min(84vw,320px)] bg-white dark:bg-gray-900 shadow-xl">
             <button
               type="button"
               aria-label="Close navigation"
               onClick={() => setMobileNavOpen(false)}
-              className="absolute right-4 top-5 rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+              className="absolute right-4 top-5 rounded-lg p-2 text-gray-500 dark:text-gray-400 hover:bg-gray-100"
             >
               <X className="h-5 w-5" />
             </button>
@@ -489,19 +513,19 @@ export default function Dashboard() {
                 type="button"
                 aria-label="Open navigation"
                 onClick={() => setMobileNavOpen(true)}
-                className="mt-1 rounded-lg border border-gray-200 bg-white p-2 text-gray-600 shadow-sm lg:hidden"
+                className="mt-1 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-2 text-gray-600 dark:text-gray-400 shadow-sm lg:hidden"
               >
                 <Menu className="h-5 w-5" />
               </button>
               <div>
                 <p className="mb-1 flex items-center gap-2 text-sm font-semibold text-teal-700">
-                  <span className="h-2 w-2 rounded-full bg-teal-500" />
+                  <span className="h-2 w-2 rounded-full bg-teal-50 dark:bg-teal-900/300" />
                   Official command centre
                 </p>
                 <h1 className="text-2xl font-bold tracking-tight text-gray-950 sm:text-3xl">
-                  Good morning, Ananya
+                  {greeting}{firstName ? `, ${firstName}` : ""}
                 </h1>
-                <p className="mt-1 flex items-center gap-1.5 text-sm text-gray-500">
+                <p className="mt-1 flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
                   <MapPin className="h-4 w-4 text-gray-400" />
                   Zone 9, Chennai Metropolitan Area
                   <span className="mx-1 text-gray-300">·</span>
@@ -509,9 +533,31 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 text-sm font-medium text-gray-600 shadow-sm">
-              <ShieldCheck className="h-[18px] w-[18px] text-teal-600" />
-              <span>Official workspace</span>
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3.5 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-400 shadow-sm">
+                <ShieldCheck className="h-[18px] w-[18px] text-teal-600" />
+                <span>Official workspace</span>
+              </div>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowProfileMenu(!showProfileMenu)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-100 text-xs font-bold text-teal-800 dark:bg-teal-900/50 dark:text-teal-400 hover:ring-2 hover:ring-teal-300 transition-all focus:outline-none"
+                >
+                  {getInitials(signedInUser?.full_name)}
+                </button>
+                {showProfileMenu && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-2 shadow-xl z-50">
+                    <button
+                      onClick={handleLogout}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors mt-1"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Log out
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
 
@@ -534,7 +580,7 @@ export default function Dashboard() {
               value={isLoading ? "—" : activeSiteCount}
               detail="Across your jurisdiction"
               icon={HardHat}
-              iconClass="bg-blue-50 text-blue-700"
+              iconClass="bg-blue-50 dark:bg-blue-900/30 text-blue-700"
               trend="Live portfolio"
               trendIcon={Activity}
             />
@@ -562,18 +608,18 @@ export default function Dashboard() {
               value={isLoading ? "—" : new Set(projects.map((project) => project.department)).size}
               detail="Coordinating road works"
               icon={Building2}
-              iconClass="bg-teal-50 text-teal-700"
+              iconClass="bg-teal-50 dark:bg-teal-900/30 text-teal-700"
               trend="Zone 9"
               trendIcon={MapPin}
             />
           </section>
 
           <section aria-labelledby="map-heading" className="grid gap-6 2xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,0.8fr)]">
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-md">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
+            <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800/50 px-5 py-4 sm:px-6">
                 <div>
-                  <h2 id="map-heading" className="text-lg font-bold text-gray-900">Jurisdiction & live works</h2>
-                  <p className="mt-0.5 text-sm text-gray-500">Active road cuts and detected spatial overlaps</p>
+                  <h2 id="map-heading" className="text-lg font-bold text-gray-900 dark:text-gray-50">Jurisdiction & live works</h2>
+                  <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">Active road cuts and detected spatial overlaps</p>
                 </div>
                 <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
@@ -584,8 +630,8 @@ export default function Dashboard() {
                 <div className="h-[340px] overflow-hidden rounded-lg sm:h-[410px]">
                   <MapView />
                 </div>
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-2 pb-1 pt-4 text-xs text-gray-600">
-                  <span className="font-semibold text-gray-700">Map key</span>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-2 pb-1 pt-4 text-xs text-gray-600 dark:text-gray-400">
+                  <span className="font-semibold text-gray-700 dark:text-gray-300">Map key</span>
                   <span className="inline-flex items-center gap-2">
                     <span className="h-1.5 w-6 rounded-full bg-emerald-500" /> On schedule
                   </span>
@@ -599,11 +645,11 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
+            <div className="flex flex-col rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-md sm:p-6">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-bold text-gray-900">Conflict watch</h2>
-                  <p className="mt-0.5 text-sm text-gray-500">Cross-department risk alerts</p>
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-gray-50">Conflict watch</h2>
+                  <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">Cross-department risk alerts</p>
                 </div>
                 <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700">
                   {isLoading ? "—" : conflicts.length} alerts
@@ -611,7 +657,7 @@ export default function Dashboard() {
               </div>
               <div className="mt-5 flex-1 space-y-3">
                 {isLoading ? (
-                  <div className="flex items-center justify-center rounded-lg bg-gray-50 px-4 py-12 text-sm text-gray-500">
+                  <div className="flex items-center justify-center rounded-lg bg-gray-50 dark:bg-gray-950 px-4 py-12 text-sm text-gray-500 dark:text-gray-400">
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading alerts…
                   </div>
                 ) : conflicts.length === 0 ? (
@@ -622,14 +668,14 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   conflicts.slice(0, 4).map((conflict) => (
-                    <div key={`${conflict.project1_id}-${conflict.project2_id}`} className="rounded-lg border border-gray-200 p-3.5">
+                    <div key={`${conflict.project1_id}-${conflict.project2_id}`} className="rounded-lg border border-gray-200 dark:border-gray-800 p-3.5">
                       <div className="flex items-center justify-between gap-3">
                         <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${riskClasses(conflict.delay_risk_score)}`}>
                           {riskLabel(conflict.delay_risk_score)} risk
                         </span>
-                        <span className="text-xs text-gray-500">{conflict.overlap_metres} m overlap</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">{conflict.overlap_metres} m overlap</span>
                       </div>
-                      <p className="mt-2.5 text-sm font-semibold leading-snug text-gray-800">
+                      <p className="mt-2.5 text-sm font-semibold leading-snug text-gray-800 dark:text-gray-200">
                         {shortDepartment(conflict.dept1)} <span className="font-normal text-gray-400">with</span>{" "}
                         {shortDepartment(conflict.dept2)}
                       </p>
@@ -639,7 +685,7 @@ export default function Dashboard() {
                           style={{ width: `${Math.min(100, Math.max(0, conflict.delay_risk_score))}%` }}
                         />
                       </div>
-                      <p className="mt-1.5 text-right text-xs font-semibold text-gray-600">
+                      <p className="mt-1.5 text-right text-xs font-semibold text-gray-600 dark:text-gray-400">
                         {conflict.delay_risk_score}% delay probability
                       </p>
                     </div>
@@ -659,9 +705,9 @@ export default function Dashboard() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700">Operations</p>
                 <h2 id="works-heading" className="mt-1 text-xl font-bold text-gray-950 sm:text-2xl">Current works & delay risk</h2>
-                <p className="mt-1 text-sm text-gray-500">Project details, contractor coordination and backend-calculated risk estimates.</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Project details, contractor coordination and backend-calculated risk estimates.</p>
               </div>
-              <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 shadow-sm">
+              <span className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 shadow-sm">
                 {isLoading ? "Loading projects…" : `${projectsWithRisk.length} active projects`}
               </span>
             </div>
@@ -675,14 +721,14 @@ export default function Dashboard() {
             {isLoading ? (
               <div className="grid gap-6 xl:grid-cols-2">
                 {[0, 1].map((item) => (
-                  <div key={item} className="h-72 animate-pulse rounded-lg border border-gray-200 bg-white shadow-md" />
+                  <div key={item} className="h-72 animate-pulse rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md" />
                 ))}
               </div>
             ) : projectsWithRisk.length === 0 ? (
-              <div className="rounded-lg border border-gray-200 bg-white p-10 text-center shadow-md">
+              <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-10 text-center shadow-md">
                 <HardHat className="mx-auto h-9 w-9 text-gray-300" />
-                <p className="mt-3 font-semibold text-gray-800">No active works found</p>
-                <p className="mt-1 text-sm text-gray-500">Projects will appear here when the backend publishes them.</p>
+                <p className="mt-3 font-semibold text-gray-800 dark:text-gray-200">No active works found</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Projects will appear here when the backend publishes them.</p>
               </div>
             ) : (
               <div className="grid gap-6 xl:grid-cols-2">
@@ -698,18 +744,18 @@ export default function Dashboard() {
             )}
           </section>
 
-          <section id="past-records" aria-labelledby="history-heading" className="scroll-mt-6 rounded-lg border border-gray-200 bg-white shadow-md">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-5 sm:px-6">
+          <section id="past-records" aria-labelledby="history-heading" className="scroll-mt-6 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800/50 px-5 py-5 sm:px-6">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700">Municipal history</p>
                 <h2 id="history-heading" className="mt-1 text-xl font-bold text-gray-950">Past records</h2>
               </div>
-              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">Recent activity</span>
+              <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600 dark:text-gray-400">Recent activity</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[680px] text-left">
                 <thead>
-                  <tr className="bg-gray-50 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                  <tr className="bg-gray-50 dark:bg-gray-950 text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     <th className="px-6 py-3">Work / Record ID</th>
                     <th className="px-6 py-3">Department</th>
                     <th className="px-6 py-3">Location</th>
@@ -719,14 +765,14 @@ export default function Dashboard() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {PAST_RECORDS_MOCK.map((record) => (
-                    <tr key={record.id} className="text-sm hover:bg-gray-50/70">
+                    <tr key={record.id} className="text-sm hover:bg-gray-50 dark:bg-gray-950/70">
                       <td className="px-6 py-4">
-                        <span className="block font-semibold text-gray-900">{record.title}</span>
+                        <span className="block font-semibold text-gray-900 dark:text-gray-50">{record.title}</span>
                         <span className="mt-0.5 block text-xs text-gray-400">{record.id}</span>
                       </td>
-                      <td className="px-6 py-4 text-gray-600">{record.department}</td>
-                      <td className="px-6 py-4 text-gray-600">{record.location}</td>
-                      <td className="px-6 py-4 text-gray-600">{record.updated}</td>
+                      <td className="px-6 py-4 text-gray-600 dark:text-gray-400">{record.department}</td>
+                      <td className="px-6 py-4 text-gray-600 dark:text-gray-400">{record.location}</td>
+                      <td className="px-6 py-4 text-gray-600 dark:text-gray-400">{record.updated}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
                           record.status === "Completed" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
@@ -740,12 +786,12 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
-            <p className="border-t border-gray-100 px-6 py-3 text-xs text-gray-400">
+            <p className="border-t border-gray-100 dark:border-gray-800/50 px-6 py-3 text-xs text-gray-400">
               History entries are sample records pending connection to the municipal records service.
             </p>
           </section>
 
-          <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 py-4 text-xs text-gray-400">
+          <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 dark:border-gray-800 py-4 text-xs text-gray-400">
             <span>Sanchal Official Dashboard · Zone 9, Chennai</span>
             <Link href="/" className="font-medium text-blue-700 hover:text-blue-900">Back to Sanchal home</Link>
           </footer>
@@ -774,21 +820,21 @@ function StatCard({
   iconClass,
   trend,
   trendIcon: TrendIcon,
-  trendClass = "text-gray-500",
+  trendClass = "text-gray-500 dark:text-gray-400",
 }: StatCardProps) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-md">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-medium text-gray-500">{label}</p>
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{label}</p>
           <p className="mt-2 text-3xl font-bold tracking-tight text-gray-950">{value}</p>
         </div>
         <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${iconClass}`}>
           <Icon className="h-5 w-5" />
         </span>
       </div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3">
-        <span className="text-xs text-gray-500">{detail}</span>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 dark:border-gray-800/50 pt-3">
+        <span className="text-xs text-gray-500 dark:text-gray-400">{detail}</span>
         <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${trendClass}`}>
           <TrendIcon className="h-3.5 w-3.5" />
           {trend}
@@ -815,10 +861,10 @@ function ProjectCard({ project, isGeneratingPdf, onGeneratePdf }: ProjectCardPro
   const DepartmentIcon = departmentIcon;
 
   return (
-    <article className="rounded-lg border border-gray-200 bg-white p-5 shadow-md transition-shadow hover:shadow-lg sm:p-6">
+    <article className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-md transition-shadow hover:shadow-lg sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-700">
             <DepartmentIcon className="h-5 w-5" />
           </span>
           <div className="min-w-0">
@@ -830,10 +876,10 @@ function ProjectCard({ project, isGeneratingPdf, onGeneratePdf }: ProjectCardPro
                 {isConflict ? "Conflict detected" : "Active"}
               </span>
             </div>
-            <h3 className="mt-1 text-base font-bold leading-snug text-gray-900">
+            <h3 className="mt-1 text-base font-bold leading-snug text-gray-900 dark:text-gray-50">
               {shortDepartment(project.department)}
             </h3>
-            <p className="mt-1 text-sm text-gray-500">{project.purpose}</p>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{project.purpose}</p>
           </div>
         </div>
         <div className={`flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 ${riskClasses(score)}`}>
@@ -844,7 +890,7 @@ function ProjectCard({ project, isGeneratingPdf, onGeneratePdf }: ProjectCardPro
 
       <div className="mt-5">
         <div className="mb-1.5 flex items-center justify-between text-xs">
-          <span className="font-medium text-gray-500">Backend delay probability</span>
+          <span className="font-medium text-gray-500 dark:text-gray-400">Backend delay probability</span>
           <span className={`font-bold ${score >= 75 ? "text-red-700" : score >= 40 ? "text-amber-700" : "text-emerald-700"}`}>
             {Math.round(score)}%
           </span>
@@ -867,7 +913,7 @@ function ProjectCard({ project, isGeneratingPdf, onGeneratePdf }: ProjectCardPro
         </p>
       </div>
 
-      <div className="mt-5 grid gap-x-5 gap-y-4 rounded-lg bg-gray-50 p-4 sm:grid-cols-2">
+      <div className="mt-5 grid gap-x-5 gap-y-4 rounded-lg bg-gray-50 dark:bg-gray-950 p-4 sm:grid-cols-2">
         <DetailItem icon={HardHat} label="Contractor" value={project.contractor.name} />
         <DetailItem icon={IndianRupee} label="Project cost" value={project.contractor.costInr > 0 ? formatCurrency(project.contractor.costInr) : "Awaiting estimate"} />
         <DetailItem icon={CalendarDays} label="Duration" value={`${projectDuration(project.startDate, project.endDate)} days · ${formatDate(project.startDate)}`} />
@@ -909,7 +955,7 @@ function DetailItem({ icon: Icon, label, value }: DetailItemProps) {
       <Icon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
       <div className="min-w-0">
         <p className="text-[11px] font-medium text-gray-400">{label}</p>
-        <p className="mt-0.5 break-words text-xs font-semibold leading-relaxed text-gray-700">{value}</p>
+        <p className="mt-0.5 break-words text-xs font-semibold leading-relaxed text-gray-700 dark:text-gray-300">{value}</p>
       </div>
     </div>
   );

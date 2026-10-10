@@ -60,6 +60,14 @@ export default function Map({
   // ── State: holds GeoJSON fetched from the FastAPI backend ──────────────
   const [conflictData, setConflictData] = useState<GeoJsonObject | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [mapKey, setMapKey] = useState(0);
+
+  // Handle React 18 Strict Mode & Fast Refresh issues with Leaflet
+  useEffect(() => {
+    return () => {
+      setMapKey((prev) => prev + 1);
+    };
+  }, []);
 
   // ── Fetch on mount ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -84,6 +92,7 @@ export default function Map({
 
   return (
     <MapContainer
+      key={`map-${mapKey}`}
       center={center}
       zoom={zoom}
       className="w-full h-full rounded-xl border border-zinc-800 z-0"
