@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { startTransition, useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -75,6 +76,18 @@ interface LocalOfficial {
   phone: string;
   email: string;
   initials: string;
+}
+
+interface StoredUser {
+  full_name: string;
+  role: "official" | "resident";
+  profession_department: string | null;
+  home_zone: string | null;
+  address_location: string | null;
+}
+
+function getInitials(fullName?: string): string {
+  return fullName?.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SC";
 }
 
 interface PastRecord {
@@ -186,6 +199,8 @@ function riskLevel(score: number): { label: string; color: string; bar: string }
 }
 
 export default function ResidentDashboard() {
+  const router = useRouter();
+  const [signedInUser, setSignedInUser] = useState<StoredUser | null>(null);
   const [works, setWorks] = useState<ApiProjectProperties[]>([]);
   const [conflicts, setConflicts] = useState<ApiConflict[]>([]);
   const [isLoadingWorks, setIsLoadingWorks] = useState(true);
@@ -197,6 +212,18 @@ export default function ResidentDashboard() {
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [reportSubmitted, setReportSubmitted] = useState(false);
   const [formError, setFormError] = useState("");
+
+  useEffect(() => {
+    try {
+      const storedUser = localStorage.getItem("sanchal_user");
+      if (storedUser) {
+        const user = JSON.parse(storedUser) as StoredUser;
+        startTransition(() => setSignedInUser(user));
+      }
+    } catch {
+      localStorage.removeItem("sanchal_user");
+    }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -332,27 +359,34 @@ export default function ResidentDashboard() {
       </nav>
 
       <div className="border-t border-gray-100 p-4">
-        <a
+        <button
           id="profile"
-          href="#resident-profile"
-          onClick={() => setMobileNavOpen(false)}
+          type="button"
+          aria-label="Open your profile"
+          onClick={() => {
+            setMobileNavOpen(false);
+            router.push("/profile");
+          }}
           className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-md transition hover:border-blue-200 hover:bg-blue-50/40"
         >
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm font-bold text-teal-800">
-            PS
+            {getInitials(signedInUser?.full_name)}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-bold text-gray-900">Priya Sharma</span>
-            <span className="block truncate text-xs text-gray-500">Zone 9 · Royapettah</span>
+            <span className="block truncate text-sm font-bold text-gray-900">{signedInUser?.full_name ?? "Your profile"}</span>
+            <span className="block truncate text-xs text-gray-500">
+              {signedInUser?.role === "official" ? "Municipal Official" : signedInUser?.role === "resident" ? "Resident" : "Profile"}
+              {signedInUser?.home_zone ? ` · ${signedInUser.home_zone}` : signedInUser?.profession_department ? ` · ${signedInUser.profession_department}` : signedInUser?.address_location ? ` · ${signedInUser.address_location}` : ""}
+            </span>
           </span>
           <ChevronRight className="h-4 w-4 text-gray-400" />
-        </a>
+        </button>
       </div>
     </div>
   );
 
   return (
-    <div className="h-screen h-dvh overflow-hidden bg-gray-50 text-gray-900 lg:flex">
+    <div className="h-screen h-dvh overflow-hidden bg-gray-50 text-gray-900 lg:pl-72 flex flex-col">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 border-r border-gray-200 bg-white lg:block">
         {sidebar}
       </aside>
@@ -372,7 +406,7 @@ export default function ResidentDashboard() {
         {sidebar}
       </aside>
 
-      <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:ml-72">
+      <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden w-full">
         <header className="sticky top-0 z-30 shrink-0 border-b border-gray-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-8">
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
             <div className="flex items-center gap-3">

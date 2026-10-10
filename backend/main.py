@@ -16,34 +16,200 @@ Install deps:
 from __future__ import annotations
 
 import math
-from datetime import date, datetime
+import os
+import re
+from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from shapely.geometry import LineString, mapping
 from shapely.ops import unary_union
+
+from database import Base, engine, get_db
+from models import User
+
+load_dotenv()
+
+JWT_SECRET = os.getenv("JWT_SECRET")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET is required. Configure backend/.env before starting the API.")
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+bearer_scheme = HTTPBearer(auto_error=False)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # App Initialization
 # ─────────────────────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
 app = FastAPI(
     title="Sanchal API",
     description="Municipal road-digging conflict detection backend — powered by Shapely.",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CORS — Allow all origins for local hackathon development
+# CORS — Add your deployed frontend origin before production deployment.
 # ─────────────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv(
+            "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+        ).split(",")
+        if origin.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class SignupRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=72)
+    role: str
+    full_name: str = Field(min_length=1, max_length=160)
+    age: int | None = Field(default=None, ge=18, le=120)
+    profession_department: str | None = Field(default=None, max_length=200)
+    address_location: str | None = Field(default=None, max_length=300)
+    home_zone: str | None = Field(default=None, max_length=160)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        normalized = value.lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized):
+            raise ValueError("Enter a valid email address.")
+        return normalized
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        if value not in {"official", "resident"}:
+            raise ValueError("Role must be 'official' or 'resident'.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_role_details(self):
+        if self.role == "official" and not self.profession_department:
+            raise ValueError("Profession or department is required for officials.")
+        if self.role == "resident" and not (self.address_location or self.home_zone):
+            raise ValueError("A home address or zone is required for residents.")
+        return self
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=72)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    role: str
+    full_name: str
+    age: int | None
+    profession_department: str | None
+    address_location: str | None
+    home_zone: str | None
+    created_at: datetime
+
+
+def create_access_token(user_id: int) -> str:
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=60)
+    return jwt.encode({"sub": str(user_id), "exp": expires_at}, JWT_SECRET, algorithm=ALGORITHM)
+
+
+def auth_result(user: User) -> dict[str, Any]:
+    return {"token": create_access_token(user.id), "user": UserResponse.model_validate(user).model_dump(mode="json")}
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired access token.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if credentials is None:
+        raise unauthorized
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[ALGORITHM])
+        user_id = int(payload.get("sub", ""))
+    except (JWTError, ValueError, TypeError):
+        raise unauthorized
+    user = db.get(User, user_id)
+    if user is None:
+        raise unauthorized
+    return user
+
+
+@app.post("/api/signup", status_code=status.HTTP_201_CREATED)
+def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    if db.scalar(select(User.id).where(User.email == payload.email)) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
+
+    user = User(
+        email=payload.email,
+        hashed_password=pwd_context.hash(payload.password),
+        role=payload.role,
+        full_name=payload.full_name,
+        age=payload.age,
+        profession_department=payload.profession_department,
+        address_location=payload.address_location,
+        home_zone=payload.home_zone,
+    )
+    db.add(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
+    return auth_result(user)
+
+
+@app.post("/api/login")
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user = db.scalar(select(User).where(User.email == payload.email))
+    if user is None or not pwd_context.verify(payload.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+    return auth_result(user)
+
+
+@app.get("/api/me", response_model=UserResponse)
+def get_me(user: User = Depends(get_current_user)) -> User:
+    return user
 
 
 # ─────────────────────────────────────────────────────────────────────────────

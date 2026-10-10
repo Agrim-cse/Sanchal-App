@@ -21,39 +21,30 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-// ─────────────────────────────────────────────
-// MOCK DATABASE
-// ─────────────────────────────────────────────
-const MOCK_USERS = [
-  {
-    email: "official@sanchal.com",
-    password: "official123",
-    role: "official" as const,
-    name: "Rajesh Kumar",
-    redirectTo: "/dashboard",
-  },
-  {
-    email: "resident@sanchal.com",
-    password: "resident123",
-    role: "resident" as const,
-    name: "Priya Sharma",
-    redirectTo: "/resident-dashboard",
-  },
-];
-
-function mockLogin(email: string, password: string) {
-  const user = MOCK_USERS.find(
-    (u) => u.email === email && u.password === password
-  );
-  if (user) return { success: true, user };
-  return { success: false, user: null };
-}
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 // ─────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────
 type Role = "official" | "resident";
 type Mode = "login" | "signup";
+
+interface AuthUser {
+  id: number;
+  email: string;
+  role: Role;
+  full_name: string;
+  age: number | null;
+  profession_department: string | null;
+  address_location: string | null;
+  home_zone: string | null;
+  created_at: string;
+}
+
+interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
 
 interface SignupOfficialData {
   fullName: string;
@@ -67,6 +58,7 @@ interface SignupOfficialData {
 interface SignupResidentData {
   fullName: string;
   homeAddress: string;
+  homeZone: string;
   email: string;
   password: string;
 }
@@ -215,18 +207,25 @@ function LoginForm({ role }: { role: Role }) {
       return;
     }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800)); // Simulated network delay
-    const result = mockLogin(email, password);
-    setLoading(false);
-    if (!result.success || !result.user) {
-      setError("Invalid email or password. Try the mock credentials below.");
-      return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await response.json() as AuthResponse & { detail?: string };
+      if (!response.ok) throw new Error(data.detail ?? "Unable to log in. Please try again.");
+      if (data.user.role !== role) {
+        throw new Error(`This account is registered as a ${data.user.role}, not a ${role}.`);
+      }
+      localStorage.setItem("sanchal_user", JSON.stringify(data.user));
+      localStorage.setItem("sanchal_token", data.token);
+      router.push(data.user.role === "official" ? "/dashboard" : "/resident-dashboard");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to log in. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    if (result.user.role !== role) {
-      setError(`This account is registered as a ${result.user.role}, not a ${role}.`);
-      return;
-    }
-    router.push(result.user.redirectTo);
   };
 
   const accent = role === "official" ? "teal" : "blue";
@@ -266,16 +265,6 @@ function LoginForm({ role }: { role: Role }) {
         </div>
       )}
 
-      {/* Mock hint box */}
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-700 space-y-0.5">
-        <p className="font-semibold">🔑 Hackathon Mock Credentials</p>
-        {role === "official" ? (
-          <p>official@sanchal.com / official123</p>
-        ) : (
-          <p>resident@sanchal.com / resident123</p>
-        )}
-      </div>
-
       <button
         type="submit"
         disabled={loading}
@@ -305,6 +294,7 @@ function SignupForm({ role }: { role: Role }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState("");
 
   // Official fields
   const [official, setOfficial] = useState<SignupOfficialData>({
@@ -320,6 +310,7 @@ function SignupForm({ role }: { role: Role }) {
   const [resident, setResident] = useState<SignupResidentData>({
     fullName: "",
     homeAddress: "",
+    homeZone: "",
     email: "",
     password: "",
   });
@@ -328,13 +319,51 @@ function SignupForm({ role }: { role: Role }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    setLoading(false);
-    setSuccess(true);
-    setTimeout(() => {
-      router.push(role === "official" ? "/dashboard" : "/resident-dashboard");
-    }, 1500);
+    const signupData = role === "official"
+      ? {
+          role,
+          full_name: official.fullName,
+          age: official.age ? Number(official.age) : null,
+          profession_department: official.profession,
+          address_location: official.officeAddress,
+          email: official.email,
+          password: official.password,
+        }
+      : {
+          role,
+          full_name: resident.fullName,
+          home_zone: resident.homeZone,
+          address_location: resident.homeAddress,
+          email: resident.email,
+          password: resident.password,
+        };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(signupData),
+      });
+      const data = await response.json() as AuthResponse & { detail?: string };
+      if (!response.ok) {
+        const detail = Array.isArray(data.detail)
+          ? data.detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ")
+          : data.detail;
+        throw new Error(detail ?? "Unable to create your account. Please try again.");
+      }
+      localStorage.setItem("sanchal_user", JSON.stringify(data.user));
+      localStorage.setItem("sanchal_token", data.token);
+      setSuccess(true);
+      window.setTimeout(() => {
+        router.push(data.user.role === "official" ? "/dashboard" : "/resident-dashboard");
+      }, 900);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to create your account. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const accent = role === "official" ? "teal" : "blue";
@@ -433,6 +462,13 @@ function SignupForm({ role }: { role: Role }) {
             icon={<Home className="w-4 h-4" />}
           />
           <Input
+            label="Home Zone"
+            placeholder="Zone 9"
+            value={resident.homeZone}
+            onChange={(v) => setResident({ ...resident, homeZone: v })}
+            icon={<MapPin className="w-4 h-4" />}
+          />
+          <Input
             label="Email Address"
             type="email"
             placeholder="you@gmail.com"
@@ -450,6 +486,13 @@ function SignupForm({ role }: { role: Role }) {
             suffix={pwdSuffix}
           />
         </>
+      )}
+
+      {error && (
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700" role="alert">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
       )}
 
       <button

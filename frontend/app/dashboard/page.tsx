@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -24,7 +25,6 @@ import {
   Route,
   ShieldCheck,
   TriangleAlert,
-  UserRound,
   Waves,
   X,
   Zap,
@@ -115,6 +115,18 @@ interface PastRecord {
   location: string;
   updated: string;
   status: RecordStatus;
+}
+
+interface StoredUser {
+  full_name: string;
+  role: "official" | "resident";
+  profession_department: string | null;
+  home_zone: string | null;
+  address_location: string | null;
+}
+
+function getInitials(fullName?: string): string {
+  return fullName?.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SC";
 }
 
 const PROJECT_ENRICHMENTS_MOCK: Record<string, ContractorInfo> = {
@@ -248,6 +260,8 @@ function getTodayLabel(): string {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
+  const [signedInUser, setSignedInUser] = useState<StoredUser | null>(null);
   const [conflicts, setConflicts] = useState<ApiConflict[]>([]);
   const [summary, setSummary] = useState<ApiSummary | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -257,6 +271,18 @@ export default function Dashboard() {
   const [generatingPdfFor, setGeneratingPdfFor] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [currentDate, setCurrentDate] = useState("Today");
+
+  useEffect(() => {
+    try {
+      const storedUser = localStorage.getItem("sanchal_user");
+      if (storedUser) {
+        const user = JSON.parse(storedUser) as StoredUser;
+        startTransition(() => setSignedInUser(user));
+      }
+    } catch {
+      localStorage.removeItem("sanchal_user");
+    }
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setCurrentDate(getTodayLabel()), 0);
@@ -402,27 +428,34 @@ export default function Dashboard() {
       </nav>
 
       <div className="border-t border-gray-100 p-4">
-        <a
-          href="#official-profile"
-          onClick={() => setMobileNavOpen(false)}
+        <button
+          type="button"
+          onClick={() => {
+            setMobileNavOpen(false);
+            router.push("/profile");
+          }}
+          aria-label="Open your profile"
           className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm transition hover:border-blue-200 hover:bg-blue-50/40"
         >
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal-100 text-teal-800">
-            <UserRound className="h-5 w-5" />
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm font-bold text-teal-800">
+            {getInitials(signedInUser?.full_name)}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-bold text-gray-900">Ananya Raman</span>
-            <span className="block truncate text-xs text-gray-500">Zone 9 · Civic Officer</span>
+            <span className="block truncate text-sm font-bold text-gray-900">{signedInUser?.full_name ?? "Your profile"}</span>
+            <span className="block truncate text-xs text-gray-500">
+              {signedInUser?.role === "official" ? "Municipal Official" : "Resident"}
+              {signedInUser?.profession_department ? ` · ${signedInUser.profession_department}` : signedInUser?.home_zone ? ` · ${signedInUser.home_zone}` : ""}
+            </span>
           </span>
           <ChevronRight className="h-4 w-4 text-gray-400" />
-        </a>
+        </button>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 lg:flex">
-      <aside className="sticky top-0 hidden h-screen w-[272px] shrink-0 border-r border-gray-200 bg-white lg:block">
+    <div className="min-h-screen bg-gray-50 text-gray-900 lg:pl-72 flex flex-col">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden h-screen w-72 border-r border-gray-200 bg-white lg:block">
         {sidebar}
       </aside>
 
@@ -448,7 +481,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <main className="min-w-0 flex-1 w-full overflow-y-auto">
         <div id="overview" className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 sm:p-6 lg:p-8">
           <header id="official-profile" className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-start gap-3">
