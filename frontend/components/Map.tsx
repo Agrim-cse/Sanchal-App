@@ -47,7 +47,15 @@ function onEachFeature(feature: Feature, layer: Layer) {
 // ---------------------------------------------------------------------------
 // Map component
 // ---------------------------------------------------------------------------
-export default function Map() {
+interface MapProps {
+  center?: [number, number];
+  zoom?: number;
+}
+
+export default function Map({
+  center = [13.0827, 80.2707],
+  zoom = 14,
+}: MapProps) {
   // ── State: holds GeoJSON fetched from the FastAPI backend ──────────────
   const [conflictData, setConflictData] = useState<GeoJsonObject | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -75,8 +83,8 @@ export default function Map() {
 
   return (
     <MapContainer
-      center={[13.0827, 80.2707]}
-      zoom={14}
+      center={center}
+      zoom={zoom}
       className="w-full h-full rounded-xl border border-zinc-800 z-0"
     >
       {/* Esri Dark Gray Canvas Tiles */}
