@@ -71,6 +71,35 @@ curl http://localhost:8000/health
 cd frontend && npx tsc --noEmit
 ```
 
+## Production deployment
+
+The app is deployed as two services: the Next.js frontend on Vercel and the
+FastAPI backend on Render. PostgreSQL remains hosted separately (for example,
+on Supabase).
+
+### Backend on Render
+
+1. Import this repository into Render as a Blueprint; Render reads
+   `render.yaml` and creates the `sanchal-api` web service.
+2. Set `DATABASE_URL` to the production PostgreSQL connection string. Render
+   generates `JWT_SECRET` for the service.
+3. After the frontend is deployed, set `FRONTEND_ORIGINS` to its exact HTTPS
+   origin (for example, `https://your-app.vercel.app`). Add any custom domain
+   origins as comma-separated values, then redeploy the API.
+4. Confirm the service health check succeeds at `/health`.
+
+### Frontend on Vercel
+
+1. Import this repository into Vercel and set the project Root Directory to
+   `frontend`.
+2. Add `NEXT_PUBLIC_API_BASE_URL` with the Render service's HTTPS origin,
+   without a trailing slash, in the Vercel project's production environment.
+3. Deploy or redeploy the frontend, then test sign-in and the dashboard.
+
+Do not commit `backend/.env` or put database credentials or signing secrets in
+Vercel's public `NEXT_PUBLIC_*` variables. If a secret was previously committed,
+rotate it before using the repository for production deployment.
+
 ## Project structure
 
 ```text
