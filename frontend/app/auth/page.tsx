@@ -10,9 +10,6 @@ import {
   Mail,
   Lock,
   User,
-  MapPin,
-  Briefcase,
-  Home,
   Eye,
   EyeOff,
   ChevronRight,
@@ -34,10 +31,10 @@ interface AuthUser {
   email: string;
   role: Role;
   full_name: string;
-  age: number | null;
-  profession_department: string | null;
-  address_location: string | null;
-  home_zone: string | null;
+  contact_number: string;
+  zone: string;
+  block: string;
+  profession: string | null;
   created_at: string;
 }
 
@@ -46,22 +43,25 @@ interface AuthResponse {
   user: AuthUser;
 }
 
-interface SignupOfficialData {
-  fullName: string;
-  age: string;
-  profession: string;
-  officeAddress: string;
-  email: string;
-  password: string;
-}
+const CHENNAI_DATA: Record<string, string[]> = {
+  "Zone 1 - Thiruvottiyur": ["Kathivakkam", "Ennore", "Thiruvottiyur"],
+  "Zone 2 - Manali": ["Manali", "Sadaiyankuppam", "Kadappakkam"],
+  "Zone 3 - Madhavaram": ["Madhavaram", "Puzhal", "Mathur"],
+  "Zone 4 - Tondiarpet": ["RK Nagar", "Royapuram", "Tondiarpet"],
+  "Zone 5 - Royapuram": ["Sowcarpet", "George Town", "Chintadripet"],
+  "Zone 6 - Thiru. Vi. Ka. Nagar": ["Perambur", "Ayanavaram", "Otteri"],
+  "Zone 7 - Ambattur": ["Padi", "Korattur", "Ambattur"],
+  "Zone 8 - Anna Nagar": ["Shenoy Nagar", "Villivakkam", "Anna Nagar"],
+  "Zone 9 - Teynampet": ["Nungambakkam", "Alwarpet", "Mylapore", "Royapettah"],
+  "Zone 10 - Kodambakkam": ["Vadapalani", "T. Nagar", "West Mambalam", "Kodambakkam"],
+  "Zone 11 - Valasaravakkam": ["Porur", "Ramapuram", "Valasaravakkam"],
+  "Zone 12 - Alandur": ["Guindy", "Nanganallur", "Alandur"],
+  "Zone 13 - Adyar": ["Besant Nagar", "Thiruvanmiyur", "Velachery", "Adyar"],
+  "Zone 14 - Perungudi": ["Kottivakkam", "Palavakkam", "Perungudi"],
+  "Zone 15 - Sholinganallur": ["Karapakkam", "Semmencherry", "Sholinganallur"],
+};
 
-interface SignupResidentData {
-  fullName: string;
-  homeAddress: string;
-  homeZone: string;
-  email: string;
-  password: string;
-}
+const PROFESSIONS = ["PWD Dept Officer", "Water Board Official", "Telecom Engineer", "Private Contractor", "Electricity Board"];
 
 // ─────────────────────────────────────────────
 // ROLE SELECTOR COMPONENT
@@ -295,227 +295,108 @@ function SignupForm({ role }: { role: Role }) {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState("");
-
-  // Official fields
-  const [official, setOfficial] = useState<SignupOfficialData>({
-    fullName: "",
-    age: "",
-    profession: "",
-    officeAddress: "",
-    email: "",
-    password: "",
-  });
-
-  // Resident fields
-  const [resident, setResident] = useState<SignupResidentData>({
-    fullName: "",
-    homeAddress: "",
-    homeZone: "",
-    email: "",
-    password: "",
-  });
-
   const [showPassword, setShowPassword] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
+  const [zone, setZone] = useState("");
+  const [block, setBlock] = useState("");
+  const [profession, setProfession] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const accent = role === "official" ? "teal" : "blue";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const signupData = role === "official"
-      ? {
-          role,
-          full_name: official.fullName,
-          age: official.age ? Number(official.age) : null,
-          profession_department: official.profession,
-          address_location: official.officeAddress,
-          email: official.email,
-          password: official.password,
-        }
-      : {
-          role,
-          full_name: resident.fullName,
-          home_zone: resident.homeZone,
-          address_location: resident.homeAddress,
-          email: resident.email,
-          password: resident.password,
-        };
-
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetch(`${API_BASE_URL}/api/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(signupData),
+        signal: controller.signal,
+        body: JSON.stringify({
+          role,
+          full_name: fullName,
+          contact_number: contactNumber,
+          zone,
+          block,
+          profession: role === "official" ? profession : null,
+          email,
+          password,
+        }),
       });
-      const data = await response.json() as AuthResponse & { detail?: string };
+      const data = await response.json() as AuthResponse & { detail?: string | { msg?: string }[] };
       if (!response.ok) {
         const detail = Array.isArray(data.detail)
-          ? data.detail.map((item: { msg?: string }) => item.msg).filter(Boolean).join(" ")
+          ? data.detail.map((item) => item.msg).filter(Boolean).join(" ")
           : data.detail;
         throw new Error(detail ?? "Unable to create your account. Please try again.");
       }
       localStorage.setItem("sanchal_user", JSON.stringify(data.user));
       localStorage.setItem("sanchal_token", data.token);
       setSuccess(true);
-      window.setTimeout(() => {
-        router.push(data.user.role === "official" ? "/dashboard" : "/resident-dashboard");
-      }, 900);
+      window.setTimeout(() => router.push(role === "official" ? "/dashboard" : "/resident-dashboard"), 900);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to create your account. Please try again.");
+      if (requestError instanceof DOMException && requestError.name === "AbortError") {
+        setError("The server took too long to respond. Check that the Sanchal API and database are running, then try again.");
+      } else if (requestError instanceof TypeError) {
+        setError("Could not reach the Sanchal API. Start the backend and try again.");
+      } else {
+        setError(requestError instanceof Error ? requestError.message : "Unable to create your account. Please try again.");
+      }
     } finally {
+      window.clearTimeout(timeout);
       setLoading(false);
     }
   };
 
-  const accent = role === "official" ? "teal" : "blue";
-
   if (success) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-8 text-center">
-        <div className={`w-16 h-16 rounded-full flex items-center justify-center ${accent === "teal" ? "bg-teal-100" : "bg-blue-100"}`}>
-          <CheckCircle2 className={`w-8 h-8 ${accent === "teal" ? "text-teal-500" : "text-blue-500"}`} />
+        <div className={`flex h-16 w-16 items-center justify-center rounded-full ${accent === "teal" ? "bg-teal-100" : "bg-blue-100"}`}>
+          <CheckCircle2 className={`h-8 w-8 ${accent === "teal" ? "text-teal-500" : "text-blue-500"}`} />
         </div>
-        <div>
-          <p className="font-bold text-slate-800 text-lg">Account Created!</p>
-          <p className="text-slate-500 text-sm mt-1">Redirecting to your portal...</p>
-        </div>
+        <div><p className="text-lg font-bold text-slate-800">Account Created!</p><p className="mt-1 text-sm text-slate-500">Redirecting to your portal...</p></div>
       </div>
     );
   }
 
-  const pwdSuffix = (
-    <button
-      type="button"
-      onClick={() => setShowPassword(!showPassword)}
-      className="text-slate-400 hover:text-slate-600 transition-colors"
-    >
-      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-    </button>
-  );
-
+  const selectClass = "w-full rounded-xl border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500";
   return (
     <form onSubmit={handleSubmit} className="space-y-3.5">
-      {role === "official" ? (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Full Name"
-              placeholder="Rajesh Kumar"
-              value={official.fullName}
-              onChange={(v) => setOfficial({ ...official, fullName: v })}
-              icon={<User className="w-4 h-4" />}
-            />
-            <Input
-              label="Age"
-              type="number"
-              placeholder="35"
-              value={official.age}
-              onChange={(v) => setOfficial({ ...official, age: v })}
-              icon={<User className="w-4 h-4" />}
-            />
-          </div>
-          <Input
-            label="Profession / Department"
-            placeholder="PWD Engineer, Water Dept..."
-            value={official.profession}
-            onChange={(v) => setOfficial({ ...official, profession: v })}
-            icon={<Briefcase className="w-4 h-4" />}
-          />
-          <Input
-            label="Office Address / Location"
-            placeholder="Municipal Corporation, Block B..."
-            value={official.officeAddress}
-            onChange={(v) => setOfficial({ ...official, officeAddress: v })}
-            icon={<MapPin className="w-4 h-4" />}
-          />
-          <Input
-            label="Official Email"
-            type="email"
-            placeholder="you@municipality.gov.in"
-            value={official.email}
-            onChange={(v) => setOfficial({ ...official, email: v })}
-            icon={<Mail className="w-4 h-4" />}
-          />
-          <Input
-            label="Password"
-            type={showPassword ? "text" : "password"}
-            placeholder="Create a strong password"
-            value={official.password}
-            onChange={(v) => setOfficial({ ...official, password: v })}
-            icon={<Lock className="w-4 h-4" />}
-            suffix={pwdSuffix}
-          />
-        </>
-      ) : (
-        <>
-          <Input
-            label="Full Name"
-            placeholder="Priya Sharma"
-            value={resident.fullName}
-            onChange={(v) => setResident({ ...resident, fullName: v })}
-            icon={<User className="w-4 h-4" />}
-          />
-          <Input
-            label="Home Address / Zone"
-            placeholder="Ward 12, Sector 4, Nagpur..."
-            value={resident.homeAddress}
-            onChange={(v) => setResident({ ...resident, homeAddress: v })}
-            icon={<Home className="w-4 h-4" />}
-          />
-          <Input
-            label="Home Zone"
-            placeholder="Zone 9"
-            value={resident.homeZone}
-            onChange={(v) => setResident({ ...resident, homeZone: v })}
-            icon={<MapPin className="w-4 h-4" />}
-          />
-          <Input
-            label="Email Address"
-            type="email"
-            placeholder="you@gmail.com"
-            value={resident.email}
-            onChange={(v) => setResident({ ...resident, email: v })}
-            icon={<Mail className="w-4 h-4" />}
-          />
-          <Input
-            label="Password"
-            type={showPassword ? "text" : "password"}
-            placeholder="Create a strong password"
-            value={resident.password}
-            onChange={(v) => setResident({ ...resident, password: v })}
-            icon={<Lock className="w-4 h-4" />}
-            suffix={pwdSuffix}
-          />
-        </>
-      )}
-
-      {error && (
-        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700" role="alert">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      <button
-        type="submit"
-        disabled={loading}
-        className={`w-full flex items-center justify-center gap-2 font-semibold py-3.5 rounded-xl transition-all duration-200 text-white shadow-md mt-2 ${
-          accent === "teal"
-            ? "bg-teal-600 hover:bg-teal-700 hover:shadow-lg hover:-translate-y-0.5 disabled:bg-teal-300 disabled:shadow-none disabled:translate-y-0"
-            : "bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:-translate-y-0.5 disabled:bg-blue-300 disabled:shadow-none disabled:translate-y-0"
-        }`}
-      >
-        {loading ? (
-          <span className="animate-pulse">Creating Account...</span>
-        ) : (
-          <>
-            Create Account
-            <ChevronRight className="w-4 h-4" />
-          </>
-        )}
+      <Input label="Full Name" placeholder="Full name" value={fullName} onChange={setFullName} icon={<User className="h-4 w-4" />} />
+      <Input label="Contact Number" type="tel" placeholder="Phone number" value={contactNumber} onChange={setContactNumber} icon={<PhoneIcon />} />
+      <label className="block space-y-1.5 text-sm font-medium text-slate-700">Zone
+        <select required value={zone} onChange={(event) => { setZone(event.target.value); setBlock(""); }} className={selectClass}>
+          <option value="">Select your zone</option>
+          {Object.keys(CHENNAI_DATA).map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <label className="block space-y-1.5 text-sm font-medium text-slate-700">Block / Neighborhood
+        <select required disabled={!zone} value={block} onChange={(event) => setBlock(event.target.value)} className={`${selectClass} disabled:cursor-not-allowed disabled:bg-gray-100`}>
+          <option value="">Select your block</option>
+          {(CHENNAI_DATA[zone] ?? []).map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      {role === "official" && <label className="block space-y-1.5 text-sm font-medium text-slate-700">Profession
+        <select required value={profession} onChange={(event) => setProfession(event.target.value)} className={selectClass}>
+          <option value="">Select profession</option>
+          {PROFESSIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>}
+      <Input label="Email Address" type="email" placeholder="you@example.com" value={email} onChange={setEmail} icon={<Mail className="h-4 w-4" />} />
+      <Input label="Password" type={showPassword ? "text" : "password"} placeholder="Create a strong password" value={password} onChange={setPassword} icon={<Lock className="h-4 w-4" />} suffix={<button type="button" onClick={() => setShowPassword(!showPassword)} className="text-slate-400 hover:text-slate-600">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>} />
+      {error && <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
+      <button type="submit" disabled={loading} className={`mt-2 flex w-full items-center justify-center gap-2 rounded-xl py-3.5 font-semibold text-white shadow-md transition-all disabled:opacity-60 ${accent === "teal" ? "bg-teal-600 hover:bg-teal-700" : "bg-blue-600 hover:bg-blue-700"}`}>
+        {loading ? "Creating Account..." : <>Create Account <ChevronRight className="h-4 w-4" /></>}
       </button>
     </form>
   );
 }
+
+function PhoneIcon() { return <span className="text-xs font-bold">☎</span>; }
 
 // ─────────────────────────────────────────────
 // MAIN AUTH PAGE

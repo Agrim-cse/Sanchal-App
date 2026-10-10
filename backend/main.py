@@ -1,21 +1,7 @@
-"""
-main.py — Sanchal Backend (FastAPI)
-─────────────────────────────────────────────────────────────────────────────
-Serves spatial conflict data to the Next.js frontend, performs real-time
-geometric conflict detection using Shapely, scores delay risk, and acts as
-a Twilio WhatsApp webhook receiver.
-
-Run:
-    uvicorn main:app --reload --port 8000
-
-Install deps:
-    pip install fastapi uvicorn python-multipart shapely
-─────────────────────────────────────────────────────────────────────────────
-"""
+"""Sanchal API: authentication, zone-scoped civic works and grievances, and delay scoring."""
 
 from __future__ import annotations
 
-import math
 import os
 import re
 from contextlib import asynccontextmanager
@@ -23,21 +9,18 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from shapely.geometry import LineString, mapping
-from shapely.ops import unary_union
 
-from database import Base, engine, get_db
-from models import User
+from database import get_db, initialize_database
+from models import Grievance, User, Work, WorkStatus
 
 load_dotenv()
 
@@ -48,34 +31,32 @@ if not JWT_SECRET:
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
+ALLOWED_PROFESSIONS = {
+    "PWD Dept Officer", "Water Board Official", "Telecom Engineer",
+    "Private Contractor", "Electricity Board",
+}
+WORK_STATUSES = {item.value for item in WorkStatus}
+GRIEVANCE_STATUSES = {"Open", "In Progress", "Resolved"}
 
-# ─────────────────────────────────────────────────────────────────────────────
-# App Initialization
-# ─────────────────────────────────────────────────────────────────────────────
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    initialize_database()
     yield
 
 
 app = FastAPI(
     title="Sanchal API",
-    description="Municipal road-digging conflict detection backend — powered by Shapely.",
-    version="2.0.0",
+    description="Location-scoped municipal works and grievance services.",
+    version="3.0.0",
     lifespan=lifespan,
 )
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CORS — Add your deployed frontend origin before production deployment.
-# ─────────────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        origin.strip()
-        for origin in os.getenv(
-            "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
-        ).split(",")
-        if origin.strip()
+        item.strip()
+        for item in os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+        if item.strip()
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -90,18 +71,18 @@ class SignupRequest(BaseModel):
     password: str = Field(min_length=8, max_length=72)
     role: str
     full_name: str = Field(min_length=1, max_length=160)
-    age: int | None = Field(default=None, ge=18, le=120)
-    profession_department: str | None = Field(default=None, max_length=200)
-    address_location: str | None = Field(default=None, max_length=300)
-    home_zone: str | None = Field(default=None, max_length=160)
+    contact_number: str = Field(min_length=1, max_length=32)
+    zone: str = Field(min_length=1, max_length=160)
+    block: str = Field(min_length=1, max_length=160)
+    profession: str | None = Field(default=None, max_length=100)
 
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: str) -> str:
-        normalized = value.lower()
-        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", normalized):
+        value = value.lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
             raise ValueError("Enter a valid email address.")
-        return normalized
+        return value
 
     @field_validator("role")
     @classmethod
@@ -111,11 +92,11 @@ class SignupRequest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_role_details(self):
-        if self.role == "official" and not self.profession_department:
-            raise ValueError("Profession or department is required for officials.")
-        if self.role == "resident" and not (self.address_location or self.home_zone):
-            raise ValueError("A home address or zone is required for residents.")
+    def validate_profession(self):
+        if self.role == "official" and self.profession not in ALLOWED_PROFESSIONS:
+            raise ValueError("Select a valid profession for officials.")
+        if self.role == "resident" and self.profession is not None:
+            raise ValueError("Profession is only accepted for officials.")
         return self
 
 
@@ -129,6 +110,10 @@ class LoginRequest(BaseModel):
         return value.strip().lower()
 
 
+class PasswordVerificationRequest(LoginRequest):
+    pass
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -136,11 +121,76 @@ class UserResponse(BaseModel):
     email: str
     role: str
     full_name: str
-    age: int | None
-    profession_department: str | None
-    address_location: str | None
-    home_zone: str | None
+    contact_number: str
+    zone: str
+    block: str
+    profession: str | None
     created_at: datetime
+
+
+class WorkInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1)
+    department: str = Field(min_length=1, max_length=160)
+    start_date: date
+    estimated_completion: date
+    status: str = "Pending"
+    cost: float = Field(ge=0)
+    conflicts_detected: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        if value not in WORK_STATUSES:
+            raise ValueError("Status must be Pending, Ongoing, or Completed.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.estimated_completion < self.start_date:
+            raise ValueError("Estimated completion cannot be before the start date.")
+        return self
+
+
+class GrievanceInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    issue_type: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1)
+    photo_url: str | None = Field(default=None, max_length=2048)
+
+
+class WorkResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    description: str
+    department: str
+    contractor_id: int
+    zone: str
+    block: str
+    start_date: date
+    estimated_completion: date
+    status: WorkStatus
+    cost: float
+    conflicts_detected: str | None
+    ml_delay_risk_score: float | None
+
+
+class GrievanceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    resident_id: int
+    zone: str
+    block: str
+    issue_type: str
+    description: str
+    photo_url: str | None
+    status: str
 
 
 def create_access_token(user_id: int) -> str:
@@ -149,7 +199,10 @@ def create_access_token(user_id: int) -> str:
 
 
 def auth_result(user: User) -> dict[str, Any]:
-    return {"token": create_access_token(user.id), "user": UserResponse.model_validate(user).model_dump(mode="json")}
+    return {
+        "token": create_access_token(user.id),
+        "user": UserResponse.model_validate(user).model_dump(mode="json"),
+    }
 
 
 def get_current_user(
@@ -174,20 +227,64 @@ def get_current_user(
     return user
 
 
+def require_role(role: str):
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        if user.role != role:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"A {role} account is required.")
+        return user
+    return dependency
+
+
+# Lightweight delay-risk estimator retained from the existing ML scoring pipeline.
+_DEPT_RISK_WEIGHT = {"tangedco": 1.4, "electricity": 1.4, "telecom": 1.2, "water": 1.0}
+
+
+def _dept_weight(dept_name: str) -> float:
+    lowered = dept_name.lower()
+    return next((weight for keyword, weight in _DEPT_RISK_WEIGHT.items() if keyword in lowered), 1.0)
+
+
+def _compute_delay_risk(p1: dict[str, Any], p2: dict[str, Any], overlap_m: float) -> float:
+    """Original schedule/overlap/department delay-risk heuristic, bounded to 0–100."""
+    s1 = date.fromisoformat(p1["startDate"])
+    e1 = date.fromisoformat(p1["endDate"])
+    s2 = date.fromisoformat(p2["startDate"])
+    e2 = date.fromisoformat(p2["endDate"])
+    temporal_days = max((min(e1, e2) - max(s1, s2)).days, 0)
+    spatial_score = min(overlap_m / 50.0, 1.0) * 60
+    temporal_score = min(temporal_days / 30.0, 1.0) * 30
+    department_penalty = ((_dept_weight(p1["department"]) + _dept_weight(p2["department"])) / 2) * 10
+    return round(min(spatial_score + temporal_score + department_penalty, 100.0), 1)
+
+
+def _estimate_work_delay_risk(
+    start: date, estimated_completion: date, department: str, conflicts_detected: str | None
+) -> float:
+    """Apply the retained delay model to a database work item and its recorded conflicts."""
+    work = {
+        "startDate": start.isoformat(),
+        "endDate": estimated_completion.isoformat(),
+        "department": department,
+    }
+    # The schema stores conflict details as text rather than geometry. Treat a
+    # recorded conflict as the model's full 50 m overlap signal; otherwise none.
+    overlap_m = 50.0 if (conflicts_detected or "").strip() else 0.0
+    return _compute_delay_risk(work, work, overlap_m)
+
+
 @app.post("/api/signup", status_code=status.HTTP_201_CREATED)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
     if db.scalar(select(User.id).where(User.email == payload.email)) is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
-
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
     user = User(
         email=payload.email,
         hashed_password=pwd_context.hash(payload.password),
         role=payload.role,
         full_name=payload.full_name,
-        age=payload.age,
-        profession_department=payload.profession_department,
-        address_location=payload.address_location,
-        home_zone=payload.home_zone,
+        contact_number=payload.contact_number,
+        zone=payload.zone,
+        block=payload.block,
+        profession=payload.profession,
     )
     db.add(user)
     try:
@@ -195,7 +292,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> dict[str, A
         db.refresh(user)
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists.")
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
     return auth_result(user)
 
 
@@ -203,8 +300,16 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> dict[str, A
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
     user = db.scalar(select(User).where(User.email == payload.email))
     if user is None or not pwd_context.verify(payload.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
     return auth_result(user)
+
+
+@app.post("/api/verify-password")
+def verify_password(payload: PasswordVerificationRequest, db: Session = Depends(get_db)) -> dict[str, bool]:
+    user = db.scalar(select(User).where(User.email == payload.email))
+    if user is None or not pwd_context.verify(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    return {"verified": True}
 
 
 @app.get("/api/me", response_model=UserResponse)
@@ -212,404 +317,80 @@ def get_me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# RAW PROJECT DATA  (the single source of truth — edit here to add projects)
-#
-# coordinates: list of [lon, lat] pairs  (GeoJSON convention)
-# Buffer radius uses decimal-degree approximation:
-#   ~0.0005° ≈ 55 m near Chennai  (1° lat ≈ 111 km)
-# ─────────────────────────────────────────────────────────────────────────────
-BUFFER_DEGREES = 0.0005   # ≈ 55-metre excavation corridor
-
-RAW_PROJECTS: list[dict[str, Any]] = [
-    {
-        "id": "PRJ-001",
-        "department": "Chennai Metropolitan Water Supply & Sewerage Board",
-        "purpose": "Underground water pipeline replacement",
-        "startDate": "2026-09-15",
-        "endDate": "2026-10-20",
-        "coordinates": [
-            [80.265, 13.082],
-            [80.268, 13.084],
-            [80.271, 13.086],
-            [80.274, 13.087],
-        ],
-    },
-    {
-        "id": "PRJ-002",
-        "department": "Jio Telecom – Fiber Division",
-        "purpose": "Fiber optic cable laying",
-        "startDate": "2026-10-01",
-        "endDate": "2026-11-05",
-        "coordinates": [
-            [80.270, 13.079],
-            [80.272, 13.082],
-            [80.274, 13.085],
-            [80.276, 13.088],
-        ],
-    },
-    {
-        "id": "PRJ-003",
-        "department": "Tamil Nadu Generation & Distribution Corporation (TANGEDCO)",
-        "purpose": "Underground power cable trench",
-        "startDate": "2026-10-03",
-        "endDate": "2026-11-10",
-        "coordinates": [
-            [80.271, 13.078],
-            [80.273, 13.081],
-            [80.275, 13.084],
-            [80.277, 13.087],
-        ],
-    },
-]
+@app.get("/api/works", response_model=list[WorkResponse])
+def get_works(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Work]:
+    return list(db.scalars(select(Work).where(Work.zone == user.zone, Work.block == user.block).order_by(Work.id.desc())))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ███  SPATIAL CONFLICT SOLVER  ███
-#
-# Algorithm:
-#   1. Convert each project's coordinates into a Shapely LineString.
-#   2. Buffer each line by BUFFER_DEGREES to create an excavation corridor.
-#   3. For every pair (i, j), test if buffer_i intersects buffer_j AND
-#      the date ranges overlap (temporal filter).
-#   4. Mark conflicting project IDs and record pairwise overlap geometry.
-#
-# Why pure Shapely (not GeoPandas)?
-#   GeoPandas requires compiled GDAL/Fiona binaries that are painful to install
-#   on Windows without conda. Shapely is a pure-Python wrapper over GEOS and
-#   installs with a single pip command.
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _parse_date(s: str) -> date:
-    return datetime.strptime(s, "%Y-%m-%d").date()
-
-
-def _dates_overlap(start1: str, end1: str, start2: str, end2: str) -> bool:
-    """Return True if two [start, end] date ranges overlap."""
-    s1, e1 = _parse_date(start1), _parse_date(end1)
-    s2, e2 = _parse_date(start2), _parse_date(end2)
-    return s1 <= e2 and s2 <= e1
-
-
-def _overlap_length_metres(geom1: LineString, geom2: LineString) -> float:
-    """
-    Approximate the length of the buffered intersection in metres.
-    Uses the centroid latitude to correct longitude degrees → metres.
-    """
-    buf1 = geom1.buffer(BUFFER_DEGREES)
-    buf2 = geom2.buffer(BUFFER_DEGREES)
-    intersection = buf1.intersection(buf2)
-    if intersection.is_empty:
-        return 0.0
-    # Convert degrees to metres at Chennai's latitude (~13°N)
-    lat_rad = math.radians(13.0827)
-    metres_per_deg_lon = 111_320 * math.cos(lat_rad)
-    metres_per_deg_lat = 110_574
-    # Use bounding box diagonal as a proxy for overlap extent
-    minx, miny, maxx, maxy = intersection.bounds
-    dx = (maxx - minx) * metres_per_deg_lon
-    dy = (maxy - miny) * metres_per_deg_lat
-    return math.sqrt(dx**2 + dy**2)
-
-
-def run_conflict_solver(projects: list[dict]) -> dict[str, Any]:
-    """
-    Run pairwise spatial + temporal conflict detection across all projects.
-
-    Returns a dict with:
-      - enriched_features : GeoJSON features with computed `status` and
-                            `conflictsWith` properties
-      - conflicts         : list of pairwise conflict records
-      - summary           : aggregate statistics
-    """
-    n = len(projects)
-
-    # Build Shapely geometries
-    lines = [LineString(p["coordinates"]) for p in projects]
-    buffers = [line.buffer(BUFFER_DEGREES) for line in lines]
-
-    # Track which project IDs are in conflict
-    conflict_ids: set[str] = set()
-    conflict_records: list[dict] = []
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            # Temporal overlap check first (cheap)
-            if not _dates_overlap(
-                projects[i]["startDate"], projects[i]["endDate"],
-                projects[j]["startDate"], projects[j]["endDate"],
-            ):
-                continue
-
-            # Spatial intersection check
-            if buffers[i].intersects(buffers[j]):
-                overlap_m = _overlap_length_metres(lines[i], lines[j])
-
-                conflict_ids.add(projects[i]["id"])
-                conflict_ids.add(projects[j]["id"])
-
-                conflict_records.append({
-                    "project1_id": projects[i]["id"],
-                    "project2_id": projects[j]["id"],
-                    "dept1": projects[i]["department"],
-                    "dept2": projects[j]["department"],
-                    "overlap_metres": round(overlap_m, 1),
-                    "delay_risk_score": _compute_delay_risk(
-                        projects[i], projects[j], overlap_m
-                    ),
-                })
-
-    # Build enriched GeoJSON features
-    features = []
-    for p in projects:
-        is_conflict = p["id"] in conflict_ids
-        conflicting_with = [
-            r["dept2"] if r["project1_id"] == p["id"] else r["dept1"]
-            for r in conflict_records
-            if p["id"] in (r["project1_id"], r["project2_id"])
-        ]
-        features.append({
-            "type": "Feature",
-            "properties": {
-                **{k: v for k, v in p.items() if k != "coordinates"},
-                "status": "Critical Overlap" if is_conflict else "On Schedule",
-                "conflictsWith": conflicting_with,
-            },
-            "geometry": {
-                "type": "LineString",
-                "coordinates": p["coordinates"],
-            },
-        })
-
-    total = len(projects)
-    overlapping = len(conflict_ids)
-    avg_risk = (
-        round(
-            sum(r["delay_risk_score"] for r in conflict_records) / len(conflict_records), 1
-        )
-        if conflict_records
-        else 0.0
+@app.post("/api/works", response_model=WorkResponse, status_code=status.HTTP_201_CREATED)
+def create_work(
+    payload: WorkInput,
+    user: User = Depends(require_role("official")),
+    db: Session = Depends(get_db),
+) -> Work:
+    work = Work(
+        **payload.model_dump(exclude={"status"}),
+        status=WorkStatus(payload.status),
+        contractor_id=user.id,
+        zone=user.zone,
+        block=user.block,
+        ml_delay_risk_score=_estimate_work_delay_risk(
+            payload.start_date, payload.estimated_completion, payload.department, payload.conflicts_detected
+        ),
     )
-
-    return {
-        "enriched_features": features,
-        "conflicts": conflict_records,
-        "summary": {
-            "total_projects": total,
-            "active_excavations": total,
-            "critical_overlaps": len(conflict_records),
-            "projects_in_conflict": overlapping,
-            "avg_delay_risk_pct": avg_risk,
-        },
-    }
+    db.add(work)
+    db.commit()
+    db.refresh(work)
+    return work
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ███  DELAY RISK SCORER  ███
-#
-# A lightweight heuristic model (no ML framework needed for MVP).
-# Factors:
-#   • Spatial overlap length  — longer overlap = higher risk
-#   • Temporal overlap days   — more concurrent days = higher risk
-#   • Department type penalty — power/telecom vs water has higher disruption risk
-#
-# Score is bounded [0, 100]. Replace with LightGBM later by swapping this fn.
-# ─────────────────────────────────────────────────────────────────────────────
-
-_DEPT_RISK_WEIGHT = {
-    "tangedco": 1.4,    # Electricity — highest disruption, safety risk
-    "telecom":  1.2,    # Telecom fiber — moderate, often urgent
-    "water":    1.0,    # Water — baseline
-}
-
-
-def _dept_weight(dept_name: str) -> float:
-    name_lower = dept_name.lower()
-    for keyword, weight in _DEPT_RISK_WEIGHT.items():
-        if keyword in name_lower:
-            return weight
-    return 1.0
-
-
-def _compute_delay_risk(p1: dict, p2: dict, overlap_m: float) -> float:
-    """
-    Heuristic delay risk score in [0, 100].
-
-    Formula:
-        base     = min(overlap_m / 50, 1.0) * 60   # spatial component, max 60pts
-        temporal = min(temporal_overlap_days / 30, 1.0) * 30  # time component, max 30pts
-        dept_pen = (weight1 + weight2) / 2 * 10    # dept penalty, max ~14pts
-        total    = clamp(base + temporal + dept_pen, 0, 100)
-    """
-    # Temporal overlap in days
-    s1, e1 = _parse_date(p1["startDate"]), _parse_date(p1["endDate"])
-    s2, e2 = _parse_date(p2["startDate"]), _parse_date(p2["endDate"])
-    overlap_start = max(s1, s2)
-    overlap_end   = min(e1, e2)
-    temporal_days = max((overlap_end - overlap_start).days, 0)
-
-    spatial_score   = min(overlap_m / 50.0, 1.0) * 60
-    temporal_score  = min(temporal_days / 30.0, 1.0) * 30
-    dept_penalty    = ((_dept_weight(p1["department"]) + _dept_weight(p2["department"])) / 2) * 10
-
-    raw = spatial_score + temporal_score + dept_penalty
-    return round(min(raw, 100.0), 1)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ███  NLP SENTIMENT STUB  ███
-#
-# Placeholder for Hugging Face integration.
-# Drop-in replacement: swap the body with a transformers pipeline call.
-# ─────────────────────────────────────────────────────────────────────────────
-
-def analyse_sentiment(text: str) -> dict[str, Any]:
-    """
-    Stub: returns mock sentiment for a grievance message.
-    Replace with:
-        from transformers import pipeline
-        _pipe = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment")
-        result = _pipe(text)[0]
-    """
-    text_lower = text.lower()
-    negative_keywords = ["broken", "damage", "flood", "leak", "accident", "urgent", "dead"]
-    score = sum(1 for kw in negative_keywords if kw in text_lower)
-
-    if score >= 2:
-        return {"label": "NEGATIVE", "confidence": 0.91, "urgency": "High"}
-    elif score == 1:
-        return {"label": "NEGATIVE", "confidence": 0.65, "urgency": "Medium"}
-    else:
-        return {"label": "NEUTRAL",  "confidence": 0.80, "urgency": "Low"}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Pre-compute on startup so endpoints are instant
-# ─────────────────────────────────────────────────────────────────────────────
-_solver_result = run_conflict_solver(RAW_PROJECTS)
-print("─" * 60)
-print("[Sanchal] Spatial conflict solver ran on startup")
-print(f"  Projects   : {_solver_result['summary']['total_projects']}")
-print(f"  Overlaps   : {_solver_result['summary']['critical_overlaps']}")
-print(f"  Avg risk   : {_solver_result['summary']['avg_delay_risk_pct']}%")
-for c in _solver_result["conflicts"]:
-    print(f"  ⚠  {c['dept1']}  ×  {c['dept2']}")
-    print(f"     overlap={c['overlap_metres']}m  risk={c['delay_risk_score']}%")
-print("─" * 60)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# GET /api/projects
-# Returns a GeoJSON FeatureCollection with Shapely-computed conflict statuses.
-# ─────────────────────────────────────────────────────────────────────────────
-@app.get(
-    "/api/projects",
-    summary="Get active road-cut projects with computed conflict status",
-    response_description="GeoJSON FeatureCollection — status field is computed by Shapely",
-)
-async def get_projects() -> dict:
-    """
-    Returns a GeoJSON FeatureCollection. Each feature's `status` property
-    ('Critical Overlap' or 'On Schedule') is computed at startup by the
-    Shapely spatial conflict solver, not hardcoded.
-    """
-    return {
-        "type": "FeatureCollection",
-        "features": _solver_result["enriched_features"],
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# GET /api/conflicts
-# Returns pairwise conflict records + summary statistics.
-# The frontend sidebar should consume this endpoint instead of its hardcoded array.
-# ─────────────────────────────────────────────────────────────────────────────
-@app.get(
-    "/api/conflicts",
-    summary="Get pairwise conflict records and summary stats",
-)
-async def get_conflicts() -> dict:
-    """
-    Returns:
-      - conflicts : list of pairwise conflict objects with overlap_metres
-                   and delay_risk_score computed by the heuristic scorer
-      - summary   : aggregate stats (total projects, overlaps, avg risk %)
-    """
-    return {
-        "conflicts": _solver_result["conflicts"],
-        "summary": _solver_result["summary"],
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# POST /api/whatsapp
-# Twilio WhatsApp webhook receiver.
-# Now runs NLP sentiment analysis on the inbound message and tailors the reply.
-# ─────────────────────────────────────────────────────────────────────────────
-@app.post(
-    "/api/whatsapp",
-    summary="Twilio WhatsApp webhook with NLP sentiment routing",
-    response_description="TwiML XML response sent back to Twilio",
-)
-async def whatsapp_webhook(request: Request) -> Response:
-    """
-    Receives an inbound WhatsApp message from Twilio.
-    Runs sentiment analysis on the message body to detect urgency,
-    logs results to terminal, and returns a context-aware TwiML reply.
-    """
-    form_data = await request.form()
-    sender: str = str(form_data.get("From", "unknown"))
-    body: str   = str(form_data.get("Body", ""))
-
-    # NLP sentiment analysis
-    sentiment = analyse_sentiment(body)
-    conflict_count = _solver_result["summary"]["critical_overlaps"]
-
-    print("─" * 60)
-    print("[Sanchal WhatsApp] Incoming message")
-    print(f"  From      : {sender}")
-    print(f"  Body      : {body}")
-    print(f"  Sentiment : {sentiment['label']} (confidence={sentiment['confidence']}, urgency={sentiment['urgency']})")
-    print("─" * 60)
-
-    # Build context-aware TwiML reply
-    if sentiment["urgency"] == "High":
-        reply_text = (
-            f"🚨 Sanchal AI [URGENT]: Your grievance has been flagged as HIGH priority. "
-            f"There are currently {conflict_count} active road-digging conflicts in Chennai. "
-            "An escalation report is being generated for the District Collector."
-        )
-    elif conflict_count > 0:
-        reply_text = (
-            f"⚠ Sanchal AI: We have received your query. "
-            f"Our system has detected {conflict_count} active digging conflict(s) near you. "
-            "Type 'REPORT' to receive a detailed conflict summary."
-        )
-    else:
-        reply_text = (
-            "✅ Sanchal AI: We have received your query. "
-            "No critical road conflicts are currently active in your area. "
-            "We will notify you if a new conflict is detected."
-        )
-
-    twiml_response = (
-        "<?xml version='1.0' encoding='UTF-8'?>"
-        "<Response>"
-        f"<Message>{reply_text}</Message>"
-        "</Response>"
+@app.put("/api/works/{work_id}", response_model=WorkResponse)
+def update_work(
+    work_id: int,
+    payload: WorkInput,
+    user: User = Depends(require_role("official")),
+    db: Session = Depends(get_db),
+) -> Work:
+    work = db.scalar(select(Work).where(
+        Work.id == work_id, Work.zone == user.zone, Work.block == user.block
+    ))
+    if work is None:
+        raise HTTPException(status_code=404, detail="Work not found in your zone and block.")
+    for field, value in payload.model_dump(exclude={"status"}).items():
+        setattr(work, field, value)
+    work.status = WorkStatus(payload.status)
+    work.ml_delay_risk_score = _estimate_work_delay_risk(
+        payload.start_date, payload.estimated_completion, payload.department, payload.conflicts_detected
     )
+    db.commit()
+    db.refresh(work)
+    return work
 
-    return Response(content=twiml_response, media_type="application/xml")
+
+@app.get("/api/grievances", response_model=list[GrievanceResponse])
+def get_grievances(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[Grievance]:
+    return list(db.scalars(select(Grievance).where(
+        Grievance.zone == user.zone, Grievance.block == user.block
+    ).order_by(Grievance.id.desc())))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Health check
-# ─────────────────────────────────────────────────────────────────────────────
+@app.post("/api/grievances", response_model=GrievanceResponse, status_code=status.HTTP_201_CREATED)
+def create_grievance(
+    payload: GrievanceInput,
+    user: User = Depends(require_role("resident")),
+    db: Session = Depends(get_db),
+) -> Grievance:
+    grievance = Grievance(
+        **payload.model_dump(), resident_id=user.id, zone=user.zone, block=user.block, status="Open"
+    )
+    db.add(grievance)
+    db.commit()
+    db.refresh(grievance)
+    return grievance
+
+
 @app.get("/health", include_in_schema=False)
-async def health_check() -> dict:
-    return {
-        "status": "ok",
-        "service": "Sanchal API",
-        "solver_version": "shapely-heuristic-v1",
-        "conflicts_detected": _solver_result["summary"]["critical_overlaps"],
-    }
+def health_check() -> dict[str, str]:
+    return {"status": "ok", "service": "Sanchal API"}

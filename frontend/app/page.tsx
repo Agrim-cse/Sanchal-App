@@ -180,19 +180,20 @@ function HeroSection() {
         </div>
 
         <div className="relative">
-          <div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-gradient-to-br from-slate-800 to-slate-900 aspect-[4/3] flex flex-col items-center justify-center gap-4">
+          <div className="relative aspect-[4/3] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl">
+            <Image
+              src="/chennai-grayscale-map.png"
+              alt="Grayscale street map of Chennai"
+              fill
+              priority
+              sizes="(min-width: 1024px) 50vw, 100vw"
+              className="object-cover"
+            />
             <div className="absolute top-0 left-0 right-0 h-10 bg-slate-700/60 flex items-center px-4 gap-2">
               <div className="w-2.5 h-2.5 rounded-full bg-red-400/80" />
               <div className="w-2.5 h-2.5 rounded-full bg-yellow-400/80" />
               <div className="w-2.5 h-2.5 rounded-full bg-green-400/80" />
               <div className="ml-3 bg-slate-600/60 rounded h-5 flex-1 max-w-sm" />
-            </div>
-            <div className="mt-10 flex flex-col items-center gap-3 text-center px-8">
-              <div className="w-16 h-16 rounded-2xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center">
-                <Layers className="w-8 h-8 text-teal-400" />
-              </div>
-              <p className="text-slate-400 text-sm font-medium">[Insert Hero Dashboard Screenshot Here]</p>
-              <p className="text-slate-600 text-xs">Spatial conflict map · ML risk scores · Live project status</p>
             </div>
           </div>
           <div className="absolute -bottom-4 -left-4 bg-white rounded-xl shadow-xl px-4 py-3 flex items-center gap-3">
@@ -438,10 +439,14 @@ function PortalsSection() {
                   <h3 className="text-white font-bold text-lg">Official Portal</h3>
                 </div>
               </div>
-              <div className="rounded-xl bg-slate-700/50 border border-white/10 aspect-video flex flex-col items-center justify-center gap-3 text-center p-4">
-                <Layers className="w-10 h-10 text-teal-400/60" />
-                <p className="text-slate-400 text-sm font-medium">[Insert Official Portal Screenshot Here]</p>
-                <p className="text-slate-600 text-xs">GIS conflict map · ML risk scores · Department coordination</p>
+              <div className="relative aspect-video overflow-hidden rounded-xl border border-white/10">
+                <Image
+                  src="/municipal-portal-placeholder.jpg"
+                  alt="Municipal official working with Indian flags on the desk"
+                  fill
+                  sizes="(min-width: 1024px) 50vw, 100vw"
+                  className="object-cover"
+                />
               </div>
             </div>
             <div className="p-8 space-y-4 flex-1">
@@ -479,10 +484,14 @@ function PortalsSection() {
                   <h3 className="text-white font-bold text-lg">Resident Portal</h3>
                 </div>
               </div>
-              <div className="rounded-xl bg-blue-700/30 border border-white/10 aspect-video flex flex-col items-center justify-center gap-3 text-center p-4">
-                <Users className="w-10 h-10 text-blue-300/60" />
-                <p className="text-blue-200/70 text-sm font-medium">[Insert Resident Portal Screenshot Here]</p>
-                <p className="text-blue-400/50 text-xs">Project tracker · Grievance form · PDF download</p>
+              <div className="relative aspect-video overflow-hidden rounded-xl border border-white/10">
+                <Image
+                  src="/resident-portal-placeholder.webp"
+                  alt="Smiling senior resident standing outdoors"
+                  fill
+                  sizes="(min-width: 1024px) 50vw, 100vw"
+                  className="object-cover"
+                />
               </div>
             </div>
             <div className="p-8 space-y-4 flex-1">
